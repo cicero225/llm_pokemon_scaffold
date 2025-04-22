@@ -1064,7 +1064,7 @@ class SimpleAgent:
         
         _, location, coords = self.emulator.get_state_from_memory()
 
-        collision_map = self.full_collision_map[location].to_ascii()
+        collision_map = self.update_and_get_full_collision_map(location, coords)
 
         this_location = self.label_archive.get(location)
         if this_location is None:
@@ -1301,7 +1301,7 @@ Here is key game information:
 
 RAM Information: {memory_info}
 
-ASCII MAP: {self.full_collision_map[location]}
+ASCII MAP: {self.update_and_get_full_collision_map(location, coords)}
 
 Last 10 Checkpoints: {last_checkpoints}
 
