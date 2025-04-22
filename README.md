@@ -1,6 +1,6 @@
 # Claude Plays Pokemon - Elaborate Version
 
-As seen on: https://www.lesswrong.com/posts/8aPyKyRrMAQatFSnG#fnrefxofqw3zxqa
+As seen on: https://www.lesswrong.com/posts/8aPyKyRrMAQatFSnG
 
 An of Claude playing Pokemon Red using the PyBoy emulator, based (but heavily elaborated on) on the original starter code provided by David Hershey of Anthropic (https://github.com/davidhershey/ClaudePlaysPokemonStarter/tree/main) 
 
@@ -30,6 +30,7 @@ Features NOT included (that you may be familiar with from e.g. ClaudePlaysPokemo
 2. A memory file management system a la ClaudePlaysPokemon
 
 ## Setup
+Recommended Python 3.11. That's how this was written and I think >3.11 breaks the current versions of Pyboy
 
 1. Clone this repository
 2. Install the required packages:
