@@ -30,6 +30,7 @@ Features NOT included (that you may be familiar with from e.g. ClaudePlaysPokemo
 2. A memory file management system a la ClaudePlaysPokemon
 
 ## Setup
+Recommended Python 3.11. That's how this was written and I think >3.11 breaks the current versions of Pyboy
 
 1. Clone this repository
 2. Install the required packages:
