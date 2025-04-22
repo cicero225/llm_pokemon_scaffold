@@ -91,18 +91,23 @@ class LocationCollisionMap:
                 else:
                     self.internal_map[col + local_col_offset][row + local_row_offset] = collision_map[row][col]
 
-    def to_ascii(self) -> str:
+    def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None) -> str:
         horizontal_border = "+" + "-" * self.internal_map.shape[0] + "+"
         lines = [f"({self.col_offset}, {self.row_offset})", horizontal_border]
-        for this_row in self.internal_map.transpose():  # transposing makes printing easier
+        for row_num, this_row in enumerate(self.internal_map.transpose()):  # transposing makes printing easier
             row = "|"
-            for col in this_row:
+            for col_num, col in enumerate(this_row):
                 if col == -1:
                     row += " "
                 elif col == 0:
                     row += "█"
                 elif col == 1:
-                    row += "·"
+                    real_col = self.col_offset + col_num
+                    real_row = self.row_offset + row_num
+                    if local_location_tracker and real_col > -1 and real_row > -1 and real_col < len(local_location_tracker) and real_row < len(local_location_tracker[real_col]) and local_location_tracker[real_col][real_row]:
+                        row += "x"
+                    else:
+                        row += "·"
                 elif col == 2:
                     row += "S"
                 elif col == 3:
@@ -112,17 +117,31 @@ class LocationCollisionMap:
         lines.append(horizontal_border + f"({self.col_offset + self.internal_map.shape[0] - 1}, {self.row_offset + self.internal_map.shape[1] - 1})")
 
         # Add legend
-        lines.extend(
-            [
-                "",
-                "Legend:",
-                "█ - Wall/Obstacle",
-                "· - Path/Walkable",
-                "S - Sprite",
-                "P - Player Character",
-                "  - Blank = Unknown/Unvisited"
-            ]
-        )
+        if local_location_tracker:
+            lines.extend(
+                [
+                    "",
+                    "Legend:",
+                    "█ - Wall/Obstacle",
+                    "· - CHECK HERE: Path/Walkable",
+                    "S - Sprite",
+                    "P - Player Character",
+                    "x - Already Explored",
+                    "  - Blank = Unknown/Unvisited"
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "",
+                    "Legend:",
+                    "█ - Wall/Obstacle",
+                    "· - Path/Walkable",
+                    "S - Sprite",
+                    "P - Player Character",
+                    "  - Blank = Unknown/Unvisited"
+                ]
+            )
 
         # Join all lines with newlines
         output = "\n".join(lines)
@@ -333,14 +352,15 @@ class SimpleAgent:
     def update_and_get_full_collision_map(self, location, coords):
         collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
         downsampled_terrain = self.emulator._downsample_array(collision_map)
+        local_location_tracker = self.location_tracker.get(location, [])
         # slightly more efficient than setdefault
         this_map = self.full_collision_map.get(location)
         if this_map is None:
             self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords)
-            return self.full_collision_map[location].to_ascii()
+            return self.full_collision_map[location].to_ascii(local_location_tracker)
         else:
             this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords)
-            return this_map.to_ascii()
+            return this_map.to_ascii(local_location_tracker)
 
     # TODO: An obvious refactor would be to move some of these into their own functions.
     def process_tool_call(self, tool_call):
