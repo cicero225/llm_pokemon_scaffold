@@ -1,0 +1,9 @@
+# Core requirements
+anthropic>=0.39.0  # For Claude API
+pyboy==2.2.0       # For Pokemon emulator
+
+# Image processing
+Pillow             # For image manipulation
+numpy==1.24.4      # For array operations
+google-genai
+openai
