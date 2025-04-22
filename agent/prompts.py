@@ -122,27 +122,28 @@ Append a section of IMPORTANT HINTS to help guide progress.
 PRIORITY ONE: If the conversation history shows gameplay that is in violation of the facts you have been provided, issue corrective guidance
 about the CORRECT way to proceed.
 
+PRIORITY TWO: If the conversation history shows signs of navigation problems, try to assist the agent with the following tips:
+
 TIPS TO PROVIDE FOR NAVIGATION:
 1. If a label is incorrect, STRONGLY ENCOURAGE stopping to edit the label to something else (potentially even " ").
-2. Remember that the "navigation_assistance" tool is there to query for help.
-3. If they seem to be stuck in a location, emphasize the importance of NOT revisiting EXPLORED tiles. It may even be PRIORITY ONE to stop stepping on EXPLORED tiles.
-4. In mazes, it is MORE IMPORTANT to avoid EXPLORED tiles than to go in the correct direction.
-    6a. Often in mazes, you have to go south first to eventually go north, for example. This can be very far -- 30 or more coordinate squaares away.
-    6b. In Mazes, it is important to label dead-ends to avoid repeated visits, particularly if they are covered in EXPLORED tiles.
-    6c. 0, 0 is the topmost-leftmost part of the map.
-    6d. A DEPTH-FIRST SEARCH, using EXPLORED tiles as markers of previous locations, is a great way to get through mazes. Don't turn around unless you run into a dead end.
-7. Remind about the BIG HINTS:
-   7a. Doors and stairs are NEVER IMPASSABLE.
-   7b. By extension, squares that are EXPLORED are NEVER Doors or stairs.
-   7c. IMPASSABLE Squares are never the exit from an area UNLESS they are directly on top of the black void at the edge of the map. There must be a passable (non-red) path INTO the black area for this to work.
-8. Pay attention to the ASCII maps and whether the direction of travel is sensible. They may be pathing into a dead end!
+2. Remind the agent to consult its ASCII map.
+3. Remember that the "navigation_assistance" tool is there to query for help.
+4. If they seem to be stuck in a location, emphasize the importance of NOT revisiting EXPLORED tiles. It may even be PRIORITY ONE to stop stepping on EXPLORED tiles.
+5. In mazes, it is MORE IMPORTANT to avoid EXPLORED tiles than to go in the correct direction.
+    5a. Often in mazes, you have to go south first to eventually go north, for example. This can be very far -- 30 or more coordinate squaares away.
+    5b. In Mazes, it is important to label dead-ends to avoid repeated visits, particularly if they are covered in EXPLORED tiles.
+    5c. 0, 0 is the topmost-leftmost part of the map.
+    5d. A DEPTH-FIRST SEARCH, using EXPLORED tiles as markers of previous locations, is a great way to get through mazes. Don't turn around unless you run into a dead end.
+6. Remind about the BIG HINTS:
+   6a. Doors and stairs are NEVER IMPASSABLE.
+   6b. By extension, squares that are EXPLORED are NEVER Doors or stairs.
+   6c. IMPASSABLE Squares are never the exit from an area UNLESS they are directly on top of the black void at the edge of the map. There must be a passable (non-red) path INTO the black area for this to work.
+7. Pay attention to the ASCII maps and whether the direction of travel is sensible. They may be pathing into a dead end!
    
 
 OTHER NOTES:
 1. If the wrong NPC is talked to frequently, remind yourself to label a wrong NPC's location (on the NPC's location)
-2. If the same coordinate locations repeat themselves constantly, suggest avoiding these tiles since they are probably not the right place to stand.
-3. If they seem to be stuck in a location, remind them to stop walking into IMPASSABLE squares.
-4. If they are trying to reach a location on screen, remind them that the "navigate_to" tool may be able to get them there.
+2. If they are trying to reach a location on screen, remind them that the "navigate_to" tool may be able to get them there.
 
 When hinting, AVOID repeating coordinates or locations you do not see on screen from the conversation history -- the conversation is often
 mistaken about the exact location of objects or NPCs, and repeating it can reinforce the mistake.
@@ -219,6 +220,8 @@ SYSTEM_PROMPT = """You are playing Pokemon Red. You can see the game screen and 
 Your goal is to play through Pokemon Red and eventually defeat the Elite Four. Make decisions based on what you see on the screen.
 
 Screenshots are taken every time you take an action, and you are provided with an ASCII based on your exploration to help you navigate.
+
+VERY IMPORTANT: When navigating the ASCII map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead endd and reach new unexplored areas.
 
 VERY IMPORTANT: CAREFULLY INSPECT your screenshot. There are TEXT LABELS identifying coordinates as well as whether you have EXPLORED an area.
 Often, it is important to avoid EXPLORED tiles and instead go to tiles you haven't explored (label CHECK HERE).
