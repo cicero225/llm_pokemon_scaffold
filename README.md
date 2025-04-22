@@ -1,6 +1,6 @@
 # Claude Plays Pokemon - Elaborate Version
 
-As seen on: https://www.lesswrong.com/posts/8aPyKyRrMAQatFSnG#fnrefxofqw3zxqa
+As seen on: https://www.lesswrong.com/posts/8aPyKyRrMAQatFSnG
 
 An of Claude playing Pokemon Red using the PyBoy emulator, based (but heavily elaborated on) on the original starter code provided by David Hershey of Anthropic (https://github.com/davidhershey/ClaudePlaysPokemonStarter/tree/main) 
 
