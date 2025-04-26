@@ -7,6 +7,7 @@ import numpy as np
 import os
 import pickle
 from PIL import ImageDraw, ImageFilter
+import threading
 
 from config import MAX_TOKENS, MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION
 from agent.prompts import *
@@ -256,8 +257,8 @@ class SimpleAgent:
             sound: Whether to enable sound
             max_history: Maximum number of messages in history before summarization
         """
-        self.emulator = Emulator(rom_path, headless, sound)
-        self.emulator.initialize()  # Initialize the emulator
+        self.emulator = Emulator()
+        self.emulator.initialize(rom_path, headless, sound)  # Initialize the emulator
         if MODEL == "CLAUDE" or MAPPING_MODEL == "CLAUDE":
             self.anthropic_client = Anthropic(api_key=API_CLAUDE, max_retries=10)
         if MODEL == "GEMINI" or MAPPING_MODEL == "GEMINI":
@@ -1327,7 +1328,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                 logger.info(f"Completed step {steps_completed}/{num_steps}")
                 self.text_display.add_message(f"Absolute step count: {self.absolute_step_count}")
                 if save_file_name is not None and not steps_completed % save_every:
-                    self.emulator.pyboy.save_state(open(save_file_name, "wb"))
+                    self.emulator.save_state(save_file_name)
                     self.save_location_archive(self.location_archive_file_name)
                     with open("location_milestones.txt", "w") as fw:
                         fw.write(str(self.location_milestones))
@@ -1341,7 +1342,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
             
         if save_file_name is not None:
             logger.info("Saving state")
-            self.emulator.pyboy.save_state(open(save_file_name, "wb"))
+            self.emulator.save_state(save_file_name)
             self.save_location_archive(self.location_archive_file_name)
             with open("location_milestones.txt", "w") as fw:
                 fw.write(str(self.location_milestones))
@@ -1686,3 +1687,5 @@ if __name__ == "__main__":
         logger.info("Received keyboard interrupt, stopping")
     finally:
         agent.stop()
+
+    
