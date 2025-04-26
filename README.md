@@ -4,6 +4,8 @@ As seen on: https://www.lesswrong.com/posts/8aPyKyRrMAQatFSnG
 
 An of Claude playing Pokemon Red using the PyBoy emulator, based (but heavily elaborated on) on the original starter code provided by David Hershey of Anthropic (https://github.com/davidhershey/ClaudePlaysPokemonStarter/tree/main) 
 
+This is NO LONGER a basic scaffold. In fact, it adds quite a lot to try to help LLMs perform, partly see just what is necessary.
+
 The starter version included:
 
 - Simple agent that uses Claude to play Pokemon Red
