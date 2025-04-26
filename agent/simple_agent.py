@@ -53,6 +53,7 @@ class LocationCollisionMap:
                     self.internal_map[col][row] = 2
                 else:
                     self.internal_map[col][row] = initial_collision_map[row][col]
+        self.distances: dict[tuple[int, int], int] = {}
 
     def update_map(self, collision_map: np.ndarray, sprite_locations: set[tuple[int, int]], coords: tuple[int, int]):
         # Remove the previous player marker. Most convenient to do it right now.
@@ -90,44 +91,92 @@ class LocationCollisionMap:
                     self.internal_map[col + local_col_offset][row + local_row_offset] = 2
                 else:
                     self.internal_map[col + local_col_offset][row + local_row_offset] = collision_map[row][col]
+        self.distances = self.compute_effective_distance_to_tiles()
+
+    def compute_effective_distance_to_tiles(self) -> dict[tuple[int, int], int]:
+        # Basically do a distance fill
+        depth = 99
+        visited_tiles = set([self.player_coords])
+        cur_tiles = set([self.player_coords])
+        distances: dict[tuple[int, int], int] = {}
+        for d in range(depth):
+            new_tiles: set[tuple[int, int]] = set()
+            for tile in cur_tiles:
+                candidate_tiles = ((tile[0] + 1, tile[1]), (tile[0] - 1, tile[1]), (tile[0], tile[1] + 1), (tile[0], tile[1] - 1))  # I feel like there's a smarter way
+                for candidate in candidate_tiles:
+                    shifted_col = candidate[0] - self.col_offset
+                    shifted_row = candidate[1] - self.row_offset
+                    if shifted_col < 0 or shifted_row < 0 or shifted_col > self.internal_map.shape[0] - 1 or shifted_row > self.internal_map.shape[1] - 1:
+                        continue
+                    if candidate in visited_tiles:
+                        continue
+                    if self.internal_map[shifted_col][shifted_row] == 1:   # the only passable scenario
+                        new_tiles.add(candidate)
+                        distances[candidate] = d + 1
+                    visited_tiles.add(candidate)
+            cur_tiles = new_tiles
+        return distances
+
+    def generate_buttons_to_coord(self, col: int, row: int) -> Optional[list[str]]:
+        starting_distance = self.distances.get((col, row))
+        if starting_distance is None:
+            return None # invalid
+        distance = starting_distance
+        button_list = []
+        # Basically look for tiles that are labelled with successively lower numbers
+        while distance > 0:
+            # just pick whichever happens to work first.
+            left = self.distances.get((col - 1, row))
+            if (left and left == distance - 1) or (col - 1, row) == self.player_coords:
+                button_list.append("right")
+                col -= 1
+                distance -= 1
+                continue
+            right = self.distances.get((col + 1, row))
+            if (right and right == distance - 1) or (col + 1, row) == self.player_coords:
+                button_list.append("left")
+                distance -= 1
+                col += 1
+                continue
+            up = self.distances.get((col, row - 1))
+            if (up and up == distance - 1) or (col, row - 1) == self.player_coords:
+                button_list.append("down")
+                distance -= 1
+                row -= 1
+                continue
+            down = self.distances.get((col, row + 1))
+            if (down and down == distance - 1) or (col, row + 1) == self.player_coords:
+                button_list.append("up")
+                distance -= 1
+                row += 1
+                continue
+            breakpoint()
+        
+        # now reverse and return
+        button_list.reverse()
+        return button_list
 
     def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None) -> str:
-        horizontal_border = "+" + "-" * self.internal_map.shape[0] + "+"
-        lines = [f"({self.col_offset}, {self.row_offset})", horizontal_border]
-        for row_num, this_row in enumerate(self.internal_map.transpose()):  # transposing makes printing easier
-            row = "|"
-            for col_num, col in enumerate(this_row):
-                if col == -1:
-                    row += " "
-                elif col == 0:
-                    row += "█"
-                elif col == 1:
-                    real_col = self.col_offset + col_num
-                    real_row = self.row_offset + row_num
-                    if local_location_tracker and real_col > -1 and real_row > -1 and real_col < len(local_location_tracker) and real_row < len(local_location_tracker[real_col]) and local_location_tracker[real_col][real_row]:
-                        row += "x"
-                    else:
-                        row += "·"
-                elif col == 2:
-                    row += "S"
-                elif col == 3:
-                    row += "P"
-            row += "|"
-            lines.append(row)
-        lines.append(horizontal_border + f"({self.col_offset + self.internal_map.shape[0] - 1}, {self.row_offset + self.internal_map.shape[1] - 1})")
 
-        # Add legend
+        horizontal_labels = list(range(self.col_offset, self.col_offset+self.internal_map.shape[0]))
+
+
+        horizontal_border = "  +" + "".join(str(x) + " "*(4-len(str(x))) for x in horizontal_labels) + "+"
+
+        lines = []
+        # Add legend FIRST (better for models)
         if local_location_tracker:
             lines.extend(
                 [
                     "",
                     "Legend:",
-                    "█ - Wall/Obstacle",
-                    "· - CHECK HERE: Path/Walkable",
-                    "S - Sprite",
-                    "P - Player Character",
-                    "x - Already Explored",
-                    "  - Blank = Unknown/Unvisited"
+                    "██ - Wall/Obstacle",
+                    "·· - CHECK HERE: Path/Walkable",
+                    "SS - Sprite",
+                    "PP - Player Character",
+                    "xx - AVOID GOING HERE - Already Explored",
+                    "uu - CHECK HERE: Blank = Unknown/Unvisited",
+                    "Numbers - How many tiles away this tile is to reach."
                 ]
             )
         else:
@@ -135,13 +184,41 @@ class LocationCollisionMap:
                 [
                     "",
                     "Legend:",
-                    "█ - Wall/Obstacle",
-                    "· - Path/Walkable",
-                    "S - Sprite",
-                    "P - Player Character",
-                    "  - Blank = Unknown/Unvisited"
+                    "██ - Wall/Obstacle",
+                    "·· - Path/Walkable",
+                    "SS - Sprite",
+                    "PP - Player Character",
+                    "uu - Blank = Unknown/Unvisited"
                 ]
             )
+
+        lines += [f"({self.col_offset}, {self.row_offset})", horizontal_border]
+        for row_num, this_row in enumerate(self.internal_map.transpose()):  # transposing makes printing easier
+            real_row = self.row_offset + row_num
+            row = f"{str(real_row) + ' ' * (2 - len(str(real_row)))}|"
+            for col_num, col in enumerate(this_row):
+                if col == -1:
+                    row += " uu "
+                elif col == 0:
+                    row += " ██ "
+                elif col == 1:
+                    real_col = self.col_offset + col_num
+                    # Potentially place a distance marker:
+                    distance = self.distances.get((real_col, real_row))
+                    if distance:  # removes 0 and None
+                        row += str(distance) + " " * (4 - len(str(distance)))
+                    elif local_location_tracker and real_col > -1 and real_row > -1 and real_col < len(local_location_tracker) and real_row < len(local_location_tracker[real_col]) and local_location_tracker[real_col][real_row]:
+                        row += " xx "
+                    else:
+                        row += " ·· "
+                elif col == 2:
+                    row += " SS "
+                elif col == 3:
+                    row += " PP "
+            row += f"|{str(real_row)}"
+            lines.append(row)
+        lines.append(horizontal_border + f"({self.col_offset + self.internal_map.shape[0] - 1}, {self.row_offset + self.internal_map.shape[1] - 1})")
+
 
         # Join all lines with newlines
         output = "\n".join(lines)
