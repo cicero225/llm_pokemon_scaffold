@@ -242,10 +242,9 @@ OTHER NOTES:
 When hinting, AVOID repeating coordinates or locations you do not see on screen from the conversation history -- the conversation is often
 mistaken about the exact location of objects or NPCs, and repeating it can reinforce the mistake.
 
-For example:
-    BAD ADVICE: 1.  **NPC Interaction:** Professor Oak is at (6, 9), the Rival is at (2, 9), and the Aide is at (8, 9). Ensure you are directly adjacent to and *facing* the person you want to interact with.
-    GOOD ADVICE: 1.  **NPC Interaction:** Verify thte location of Professor Oak visually. Ensure you are directly adjacent to and *facing* the person you want to interact with.
+HOWEVER coordinates you get from the summary are reliable.
 
+Note: At times there will be long periods of nonactivity where another program is handling navigation between battles in an area. This is expected and normal.
 """
 
 
@@ -290,7 +289,7 @@ Tool usage instructions (READ CAREFULLY):
 FOR ALL TOOLS, you must provide an explanation_of_action argument, explaining your reasoning for calling the tool. This will
 be provided to the human observers.
 
-navigation_assistance: When stuck on a difficult navigation task, ask this tool for help by stating your current goal, and a separate model will provide advice.
+detailed_navigator: When stuck on a difficult navigation task, ask this tool for help by stating your current goal, and a separate model will provide advice.
 
 tips for this tool:
 1. Provide the location that you had a map for. For instance, if it was PEWTER CITY, provide PEWTER CITY. This may not be your current RAM location.
@@ -313,11 +312,13 @@ SYSTEM_PROMPT = """You are playing Pokemon Red. You can see the game screen and 
 
 Your goal is to play through Pokemon Red and eventually defeat the Elite Four. Make decisions based on what you see on the screen.
 
-Screenshots are taken every time you take an action, and you are provided with an ASCII based on your exploration to help you navigate.
+Screenshots are taken every time you take an action, and you are provided with an ASCII map based on your exploration to help you navigate.
 
-VERY IMPORTANT: When navigating the ASCII map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead endd and reach new unexplored areas.
+VERY IMPORTANT: When navigating the ASCII map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead ends and reach new unexplored areas.
+VERY IMPORTANT: IF you know the coordinates of where you're trying to go, remember that the "navigate_to_offscreen_coordinate" can provide you detailed instructions.
+REMEMBER TO CHECK "Labeled nearby location" for location coordinates.
+    NOTE: This may not work on the very first try. Be patient! Try a few times.
 
-VERY IMPORTANT: CAREFULLY INSPECT your screenshot. There are TEXT LABELS identifying coordinates as well as whether you have EXPLORED an area.
 #### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
 Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
 1. Inspect the ASCII map
