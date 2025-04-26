@@ -16,18 +16,22 @@ This repo adds:
 - Much more elaborate scaffold features:
 
 1. A running ASCII collision map of each location is made as Claude explores and is provided to the models
+   1a. Very handholdy--it also now gives numbers indicating how far away various tiles are to reach.
 2. Logging every time Claude enters a new location for the first time
 3. An overlay inspired by both Claude and GeminiPlaysPokemon
 4. Labels automatically recorded on the map and in text when a location changes
 5. The model can "mark_checkpoint" to record achievements and keep track of progress.
 6. Claude can mark labels on the map as desired, which are recorded for the future
 7. A new more elaborate 3-stage "Meta-Critique Claude" that shows up at context summary and tries to keep an organized accounting of game state and facts
-8. A Navigation Assist tool, which is just an instance of the model instructed to study the ASCII map carefully and look for where to go. (Not fully tested, unsure how much it helps)
+8. A Navigation Assist tool, which is just an instance of the model instructed to study the ASCII map carefully and look for where to go.
+9. Separate emulator threading, so it will keep running while the agent is thinking rather than pausing.
+10. A new tool that will auto-path Claude to a location in an area that it knows the coordinates of.
+   10a. This could have been done instructing Claude to verbally run the algorithm, but is very token-expensive and slow. You can switch it back to Claude in config (note: you'll have to jack up the tokens in the code and implement streaming for it work for great distances)
+11. Numerous small scaffold improvements (like not lying to the model about its available moves at the edge of warp boundaries or next to Sprites.)
 
 Features NOT included (that you may be familiar with from e.g. ClaudePlaysPokemon):
 
-1. Separately threaded emulator (So, the emulator will pause every time the model is thinking, rather than continuing to run and play music etc.)
-2. A memory file management system a la ClaudePlaysPokemon
+1. A memory file management system a la ClaudePlaysPokemon
 
 ## Setup
 Recommended Python 3.11. That's how this was written and I think >3.11 breaks the current versions of Pyboy
@@ -74,6 +78,7 @@ Note: You may keyboard interrupt the bot at any time and it will *usually* autom
 - `agent/memory_reader.py`: Extracts game state information from emulator memory
 - `agent/prompts.py`: System prompts for the various internal agents etc.
 - `agent/tool_definitions.py`: Tool Definitions for the tools the models can call.
+- `agent/utils.py`: Various utilities, currently just Gemini stuff
 
 ### How It Works
 
