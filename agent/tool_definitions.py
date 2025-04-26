@@ -110,7 +110,7 @@ AVAILABLE_TOOLS.append({
 
 AVAILABLE_TOOLS.append({
         "name": "detailed_navigator",
-        "description": "Ask for help when in a maze-like area. Use if stuck in a loop. Don't use for cities.",
+        "description": "Ask for help when in a maze-like area. Use if stuck in a loop. DO NOT USE IN CITIES OR BUILDINGS.",
         "input_schema": {
             "type": "object",
             "properties": {

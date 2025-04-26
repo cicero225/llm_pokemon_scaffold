@@ -379,7 +379,7 @@ Action to take.
 
 Tool usage instructions (READ CAREFULLY):
 
-detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300.
+detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300. DO NOT USE THIS IN CITIES OR BUILDINGS.
 
 tips for this tool:
 1. Provide the location that you had a map for. For instance, if it was PEWTER CITY, provide PEWTER CITY. This may not be your current RAM location.
