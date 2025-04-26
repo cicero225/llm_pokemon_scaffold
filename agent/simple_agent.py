@@ -575,7 +575,8 @@ class SimpleAgent:
                         {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
                         {"type": "text", "text": f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}"},
                         {"type": "text", "text": f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}"},
-                        {"type": "text", "text": f"Here are your last 10 checkpoints:\n{last_checkpoints}"}
+                        {"type": "text", "text": f"Here are your last 10 checkpoints:\n{last_checkpoints}"},
+                        {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                     ]
                 if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                     content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
@@ -1115,7 +1116,9 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                                     "text": (f"\nGame state information from memory after your action:\n{memory_info}"
                                             f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}" +
                                             f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}" +
-                                            f"Here are your last 10 checkpoints:\n{last_checkpoints}"),
+                                            f"Here are your last 10 checkpoints:\n{last_checkpoints}",
+                                            f"You have been in this location for {self.steps_since_location_shift} steps"),
+                                            
                                 },
                                 {
                                     "type": "input_image",
@@ -1594,6 +1597,8 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
 Here is key game information:
 
 RAM Information: {memory_info}
+
+Steps Since last Location Shift: {self.steps_since_location_shift}
 
 ASCII MAP: {self.update_and_get_full_collision_map(location, coords)}
 
