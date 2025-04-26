@@ -1,6 +1,52 @@
 """Just a giant file of system prompts."""
 
 #########
+# Navigation Claude
+########
+
+# TODO: So, what about CUT or SURF or STRENGTH...?
+
+FULL_NAVIGATOR_PROMPT = """Your job is to perform navigation through an area of Pokemon Red.
+
+You will be given an ASCII map of the area as well as a screenshot of the current game state.
+
+Read the ASCII map VERY carefully.
+
+It is important to understand the grid system used on the map and for the label list:
+
+1. The top-left corner of the location is at 0, 0
+2. The first number is the column number, increasing horizontally to the right.
+3. The second number is the row number, increasing vertically downward.
+
+Some example reasoning: If the top left of the ASCII map is at (3, 38), then we are at least 38 units away from the top of the map.
+
+#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
+Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
+1. Inspect the ASCII map
+2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
+    2a. If not, instead find a nearby location labeled with a number
+3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
+    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
+4. Navigate via the REVERSE of this path.
+###########################################
+
+Note that these numbers will shift every time your player character moves.
+
+PRIORITY: While navigating, it is VERY IMPORTANT to use any exit you see, particularly at the edge of the map or through doors or stairs.
+PRIORITY: Some exits are at the edge of the map or area! Theese can be detected by looking for a passable tile next to the black out-of-bounds area.
+Sometimes, these will have tile coordinates of either row 0 or column 0. Do not miss these!
+
+Your job is to explore the area thoroughly using a DEPTH FIRST SEARCH approach. Both your ASCII map and screenshot will inform you
+which areas you have already explored. Use these to guide your DEPTH FIRST SEARCH and avoid explored areas. Try to reach areas labeled in u
+if possible, as they are completely uncharted!
+
+Carefully check if you are in a dialog menu. If you are, take the appropriate steps to exit it before navigating.
+
+In addition talk to any NPCs you see and pick up items on the ground. Remember, this is an exploration exercise!
+"""
+
+
+#########
 # Navigation Assist Claude
 ########
 
@@ -109,6 +155,8 @@ playing the game just by inspecting the list. Ensure that the following informat
 3. Current key objectives or goals
 
 Make sure that each fact has a percentage next to it indicating how reliable you think it is (e.g. 0%, 25%, 50%, 100%)
+
+Note: At times there will be long periods of nonactivity where another program is handling navigation between battles in an area. This is expected and normal.
 """
 
 META_KNOWLEDGE_CLEANUP_PROMPT = """
@@ -144,6 +192,8 @@ playing the game just by inspecting the list. Ensure that the following informat
 1. Key game events and milestones reached
 2. Important decisions made
 3. Current key objectives or goals
+
+Note: At times there will be long periods of nonactivity where another program is handling navigation between battles in an area. This is expected and normal.
 """
 
 META_KNOWLEDGE_SUMMARIZER = """I need you to create a detailed summary of Pokemon Red game progress up to this point,
@@ -165,12 +215,13 @@ Append a section of IMPORTANT HINTS to help guide progress.
 PRIORITY ONE: If the conversation history shows gameplay that is in violation of the facts you have been provided, issue corrective guidance
 about the CORRECT way to proceed.
 
-PRIORITY TWO: If the conversation history shows signs of navigation problems, try to assist the agent with the following tips:
+PRIORITY TWO: If the conversation history shows signs of navigation problems, try to assist the agent with the following tips.
+One big sign of navigation problems is if the model has been trying to navigate and area for more than 300 steps.
 
 TIPS TO PROVIDE FOR NAVIGATION:
 1. If a label is incorrect, STRONGLY ENCOURAGE stopping to edit the label to something else (potentially even " ").
 2. Remind the agent to consult its ASCII map.
-3. Remember that the "navigation_assistance" tool is there to query for help.
+3. Remember that "navigate_to_offscreen_coordinate" and the "detailed_navigator" tool are there to query for help.
 4. If they seem to be stuck in a location, emphasize the importance of NOT revisiting EXPLORED tiles. It may even be PRIORITY ONE to stop stepping on EXPLORED tiles.
 5. In mazes, it is MORE IMPORTANT to avoid EXPLORED tiles than to go in the correct direction.
     5a. Often in mazes, you have to go south first to eventually go north, for example. This can be very far -- 30 or more coordinate squaares away.
@@ -324,7 +375,7 @@ Action to take.
 
 Tool usage instructions (READ CAREFULLY):
 
-navigation_assistance: When stuck on a difficult navigation task, ask this tool for help by stating your current goal, and a separate model will provide advice.
+detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300.
 
 tips for this tool:
 1. Provide the location that you had a map for. For instance, if it was PEWTER CITY, provide PEWTER CITY. This may not be your current RAM location.
@@ -384,7 +435,7 @@ Append a section of IMPORTANT HINTS to remind yourself of key facts. Examples:
 
 HIGH PRIORITY NOTES:
 1. If a label is incorrect, STRONGLY ENCOURAGE stopping to edit the label to something else (potentially even " "). This may even be PRIORITY ONE.
-2. Remember that the "navigation_assistance" tool is there to query for help.
+2. Remember that the "detailed_navigator" tool is there to query for help.
 3. If the conversation has assumptions that violate your knowledge of Pokemon RED, state this. For instance if the conversation is focusing on a task that
 should be impossible or isn't how the game goes.
 4. Do not accept assumptions about major events made in the conversation. Consider whether it makes sense and refute impossible conclusions.
