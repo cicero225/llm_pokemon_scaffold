@@ -974,8 +974,8 @@ Pay attention to the following procedure when trying to reach a specific locatio
         """
         logger.info(f"Starting agent loop for {num_steps} steps")
 
+        # start emulator loop
         steps_completed = 0
-        last_location = None
         while self.running and steps_completed < num_steps:
             try:
                 location = self.emulator.get_location()
@@ -984,10 +984,6 @@ Pay attention to the following procedure when trying to reach a specific locatio
                     self.text_display.add_message(f"New Location reached! {location} at {self.absolute_step_count}")
                     self.location_milestones.append((location, self.absolute_step_count))
                     self.all_visited_locations.add(location)
-                if location != last_location:
-                    if self.last_coords is not None and not self.emulator.get_in_combat():
-                        self.label_archive.setdefault(last_location, {}).setdefault(self.last_coords[1], {})[self.last_coords[0]] = f"Entrance to {location} (Approximate)"
-                    last_location = location
                 self.last_coords = coords
                 malformed = False
                 if self.detailed_navigator_mode and not self.emulator.get_in_combat():
@@ -1327,7 +1323,12 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                 if self.steps_since_label_reset > (200 if MODEL == "CLAUDE" else 1000):
                     self.text_display.add_message("Clearing labels to clear potential bad labels...")
                     self.steps_since_label_reset = 0
-                    self.label_archive[location] = {}
+                    # Hack: let's keep the ones that say "approximate" though. Those are not-Claude labels and probably fine.
+                    location_archive = self.label_archive.get(location)
+                    if location_archive:
+                        for key, value in location_archive.items():
+                            if "approximate" not in value.lower():
+                                del location_archive[key]
                 logger.info(f"Completed step {steps_completed}/{num_steps}")
                 self.text_display.add_message(f"Absolute step count: {self.absolute_step_count}")
                 if save_file_name is not None and not steps_completed % save_every:
@@ -1593,6 +1594,9 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
         except TypeError:
             previous_summary = "Start of the Game!"
         last_checkpoints = '\n'.join(self.checkpoints[-10:])
+
+        all_labels = self.get_all_location_labels(location)
+
         prompt = f"""
 Here is key game information:
 
@@ -1604,9 +1608,14 @@ ASCII MAP: {self.update_and_get_full_collision_map(location, coords)}
 
 Last 10 Checkpoints: {last_checkpoints}
 
+Labeled nearby locations: {','.join(f'{coords}: {label}' for coords, label in all_labels)}
+
 Previous game summary: {previous_summary}
 
 A game screenshot is attached.
+
+REMINDER: Your job is to deduce the current state of the game from that conversation, as well as additional data you will be provided,
+Your job is NOT to play the game. Double-check your system prompt.
 """
 
         # Get the FACTS

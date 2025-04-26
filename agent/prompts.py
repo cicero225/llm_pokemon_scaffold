@@ -137,8 +137,9 @@ Please write down a list of FACTS about the current game state, organized into t
 3. Information from the checkpoints (Mostly reliable)
 4. Information from the ASCII map (Mostly reliable, dependent on accuracy reading the map)
 5. Information from the previous game summary (Somewhat reliable, but outdated)
-6. Information from inspecting the screenshot (Not very reliable, due to mistakes in visual identification)
-7. Information from the conversation history (Not very reliable; the agent is error-prone)
+6. Labels for map locations assigned by the agent and other code. (Somewhat reliable)
+7. Information from inspecting the screenshot (Not very reliable, due to mistakes in visual identification)
+8. Information from the conversation history (Not very reliable; the agent is error-prone)
 
 KEEP IN MIND: The MOST IMPORTANT thing you do is keep track of what the next step is to progress the game. If you encounter evidence that the game is
 not in the expected state (a road is blocked, a HM is missing, etc.), you need to notice right away and include these observations.
@@ -164,12 +165,14 @@ Your job is to curate a list of assertions about the game state of a playthrough
 
 These will be provided to you in 4 groups, ranging from more to less reliable:
 
-1. Data from RAM (100% accurate)
+1. Data from RAM (100% accurate. This is provided directly by the developer and is not to be questioned.)
 2. Information from your own knowledge about Pokemon Red (Mostly reliable, dependent on recollection)
-3. Information from the ASCII map (Mostly reliable, dependent on accuracy reading the map)
-4. Information from the previous game summary (Somewhat reliable)
-5. Information from inspecting the screenshot (Not very reliable, due to mistakes in visual identification)
-6. Information from the conversation history (Not very reliable; the agent is error-prone)
+3. Information from the checkpoints (Mostly reliable)
+4. Information from the ASCII map (Mostly reliable, dependent on accuracy reading the map)
+5. Information from the previous game summary (Somewhat reliable, but outdated)
+6. Labels for map locations assigned by the agent and other code. (Somewhat reliable)
+7. Information from inspecting the screenshot (Not very reliable, due to mistakes in visual identification)
+8. Information from the conversation history (Not very reliable; the agent is error-prone)
 
 Next to each fact you will likely find a percentage indicating how reliable the fact is. Use this as a guide and avoid using unreliable facts.
 
@@ -182,7 +185,7 @@ Examples:
    But on the screenshot it appears that Professor Oak is already standing inside Oak's Lab, and the conversation history mentions trying to talk with Professor Oak.
     2b. ANSWER: Delete any claims that Professor Oak is in the lab or needs to be talked to, and emphasize that you must go north of Pallet Town. Previous knowledge of Pokemon Red and the previous game summary is much more reliable than glasncing at the screenshot or the error-prone assertions in the conversation history.
 
-In addition, delete facts from the less reliable sources (4, 5, or 6) if they are not very reliable, and also delete any coordinate information contained in these categories, as they are often wrong.
+In addition, delete facts from the less reliable sources (7, 8) if they are not very reliable, and also delete any coordinate information contained in these categories, as they are often wrong.
 
 Output a corrected list of facts about the game state. Make sure that each fact has a percentage next to it indicating how reliable you think it is (e.g. 0%, 25%, 50%, 100%)
 
