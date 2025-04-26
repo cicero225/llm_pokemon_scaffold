@@ -17,7 +17,7 @@ The starter version included:
 This repo adds:
 
 - Support for o3/o4-mini and Gemini-2.5 (Note: May have been broken recently with recent changes, sorry, but should be easy to fix)
-- Much more elaborate scaffold features.
+- Much more elaborate scaffold features
 
 New features include (works for all LLMs):
 
