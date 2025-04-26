@@ -2,7 +2,7 @@
 
 ![LLM Pokémon Scaffold](https://res.cloudinary.com/lesswrong-2-0/image/upload/c_scale,w_250/f_auto,q_auto/v1/mirroredImages/8aPyKyRrMAQatFSnG/fcqugqcpuloqkloqz9bw)
 
-An agent harness that helps LLMs play Pokemon Red using the PyBoy emulator. based on the [original starter code](<https://github.com/davidhershey/ClaudePlaysPokemonStarter/tree/main>) provided by David Hershey of Anthropic.
+An agent harness that helps LLMs play Pokemon Red using the PyBoy emulator, forked from the [original starter code](<https://github.com/davidhershey/ClaudePlaysPokemonStarter/tree/main>) provided by David Hershey of Anthropic.
 
 As seen on: [Research Notes: Running Claude 3.7, Gemini 2.5 Pro, and o3 on Pokémon Red](https://www.lesswrong.com/posts/8aPyKyRrMAQatFSnG).
 
