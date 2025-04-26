@@ -803,46 +803,7 @@ class SimpleAgent:
                                 assistant_content.append({"type": "tool_use", **dict(block)})
                 elif MODEL == "GEMINI":
                     # messages -> Gemini format
-                    google_messages = []
-                    last_tool_used = None
-                    last_image_part = None
-                    for i, message in enumerate(messages):
-                        role = message["role"]
-                        if role =="assistant":
-                            role = "model"
-                        parts = []
-                        for idx, content in enumerate(message["content"]):
-                            if isinstance(content, str):
-                                parts.append(types.Part.from_text(text=content))
-                            else:
-                                if content['type'] == 'tool_result':
-                                    # gemini gets confused sometimes with too many text parts
-                                    all_text = [content['content'][0]['text']]
-                                    if len(content['content']) > 1:
-                                        all_text.append(content['content'][1]['text'])
-                                        for x in range(3, 6):
-                                            all_text.append(content['content'][x]['text'])
-                                    all_text = "\n".join(all_text)
-                                    response_dict = copy.copy(content['content'][0])
-                                    response_dict['text'] = all_text
-                                    parts.append(types.Part.from_function_response(name=last_tool_used, response=response_dict))
-
-                                    if len(content['content']) > 1:
-                                        parts.append(types.Part.from_bytes(data=content['content'][2]['source']['data'], mime_type=content['content'][2]['source']['media_type']))
-                                        last_image_part = parts[-1]
-                                elif content['type'] == "image":
-                                    parts.append(types.Part.from_bytes(data=content['source']['data'], mime_type=content['source']['media_type']))
-                                    last_image_part = parts[-1]
-                                elif content['type'] == "text":
-                                    parts.append(types.Part.from_text(text=content['text']))
-                                    # gemini hack for weird behavior if no image
-                                    if last_image_part is not None and idx == len(message["content"]) - 1:
-                                        parts.append(last_image_part)
-
-                                elif content['type'] == 'tool_use':
-                                    last_tool_used = content['name']
-                                    parts.append(types.Part.from_function_call(name=last_tool_used, args=content['input']))
-                        google_messages.append(types.Content(parts=parts, role=role))
+                    google_messages = convert_anthropic_message_history_to_google_format(messages)
 
                     config=types.GenerateContentConfig(
                             max_output_tokens=None,
