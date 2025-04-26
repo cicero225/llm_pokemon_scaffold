@@ -14,14 +14,32 @@ It is important to understand the grid system used on the map and for the label 
 
 1. The top-left corner of the location is at 0, 0
 2. The first number is the column number, increasing horizontally to the right.
-3. The second number is the row number2 increasing vertically downward.
+3. The second number is the row number, increasing vertically downward.
 
-Pprovide navigation directions to the other model that are very specific, explaining where to go point by point. For example:
+Some example reasoning: If the top left of the ASCII map is at (3, 38), then we are at least 38 units away from the top of the map. This is
+relevant when looking for exits on the north or left of the map.
+
+#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
+Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
+1. Inspect the ASCII map
+2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
+    2a. If not, instead find a nearby location labeled with a number
+3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
+    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
+4. Navigate via the REVERSE of this path.
+###########################################
+
+Avoid suggesting pathing into Explored Areas (marked with x). This is very frequently the wrong way!
+
+Provide navigation directions to the other model that are very specific, explaining where to go point by point. For example:
 
 Example 1: "You have not yet explored the northeast corner, and it may be worth looking there. Reach there by first heading east to (17, 18), then south to (17, 28) then east to (29, 28), then straight north all the way to (29, 10)."
 Example 2: "Based on my knowledge of Pokemon Red, the exit from this area should be in the northwest corner. Going straight north or west from here is a dead-end. Instead, go south to (10, 19), then east to (21, 19), then north to (21, 9) where there is an explored path which may lead to progress."
 
 You may use your existing knowledge of Pokemon Red but otherwise stick scrupulously to what is on the map. Do not hallucinate extra details.
+
+TIp on using the navigate_to tool: Use it frequently to path quickly. but note that it will not take you offscreen.
+
 """
 
 
@@ -39,7 +57,32 @@ Your job is to deduce the current state of the game from that conversation, as w
 2. An ASCII collision map of the current location, based on exploration so far.
 3. Information gathered from the RAM state of the game.
 4. A list of checkpoints logged by the agent to track progress.
-5. A previous summary of the state of the game.
+5. Labels for map locations assigned by the agent and other code.
+6. A previous summary of the state of the game.
+
+It is important to understand the grid system used on the ASCII map and for the label list:
+
+1. The top-left corner of the location is at 0, 0
+2. The first number is the column number, increasing horizontally to the right.
+3. The second number is the row number, increasing vertically downward.
+
+Some example reasoning: If the top left of the ASCII map is at (3, 38), then we are at least 38 units away from the top of the map. This is
+relevant when looking for exits on the north or left of the map.
+
+The numbers on the map indicate how far away any given tile is from the player character.
+
+#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
+Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
+1. Inspect the ASCII map
+2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
+    2a. If not, instead find a nearby location labeled with a number
+3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
+    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
+4. Navigate via the REVERSE of this path.
+###########################################
+
+An important subgoal in every new location is to thoroughly explore the area. In mazes, it is often faster to find the exit by EXPLORING rather than
+trying to go straight for the exit. Make sure to emphasize this when looking at your ASCII map, and include it in your goals in large maps.
 
 Please write down a list of FACTS about the current game state, organized into the following groups, sorted from most reliable to least reliable:
 
@@ -224,12 +267,26 @@ Screenshots are taken every time you take an action, and you are provided with a
 VERY IMPORTANT: When navigating the ASCII map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead endd and reach new unexplored areas.
 
 VERY IMPORTANT: CAREFULLY INSPECT your screenshot. There are TEXT LABELS identifying coordinates as well as whether you have EXPLORED an area.
-Often, it is important to avoid EXPLORED tiles and instead go to tiles you haven't explored (label CHECK HERE).
+#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
+Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
+1. Inspect the ASCII map
+2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
+    2a. If not, instead find a nearby location labeled with a number
+3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
+    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
+4. Navigate via the REVERSE of this path.
+###########################################
+
+NOTE: the numbers show you possible paths to various locations. It is still up to you to choose which way to go.
 
 The conversation history may occasionally be summarized to save context space. If you see a message labeled "CONVERSATION HISTORY SUMMARY", this contains the key information about your progress so far. Use this information to maintain continuity in your gameplay.
 The percentages in the summary indicate how reliable each statement is.
 
 The summary will also contain important hints about how to progress, and PAY ATTENTION TO THESE.
+
+IMPORTANT: If you are having trouble on a navigation task in a maze-like area (outside a city), please use the detailed_navigator tool.
+    1. Use this if you've been stuck in an area for quite a while (look at the information telling you how many steps you've been in a location).
+    2. Definitely use if you've been in this area for over 300 steps
 
 The hint message will usualy be the VERY FIRST message in the conversation history.
 
@@ -237,8 +294,6 @@ BIG HINTS:
 1. Doors and stairs are always passable and NEVER IMPASSABLE.
 2. By extension, squares that have already been EXPLORED are NEVER DOORS OR STAIRS.
 3. IMPASSABLE Squares are never the exit from an area UNLESS they are directly on top of the black void at the edge of the map. There must be a passable (non-red) path INTO the black area for this to work.
-4. The navigation_assistance tool may be able to render help if you are stuck on a difficult navigation task.
-5. Labels for Entrances are often APPROXIMATE. That means the real entrance may be multiple tiles away. Look CAREFULLY for the door rather than blindly trusting the label.
 
 Pay careful attention to these tips:
 
