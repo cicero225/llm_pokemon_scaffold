@@ -438,98 +438,100 @@ class SimpleAgent:
         else:
             this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords)
             return this_map.to_ascii(local_location_tracker)
+        
+    def get_all_location_labels(self, location: str) -> list[tuple[tuple[int, int], str]]:
+        all_labels: list[tuple[tuple[int, int], str]] = []
+        this_location = self.label_archive.get(location)
+        if this_location is None:
+            # this sucks man
+            for key, value in self.label_archive.items():
+                if location.lower() == key.lower():
+                    this_location = value
+                    break
+        if this_location is not None and this_location:
+            max_row = max(this_location.keys())
+            for nearby_row in range(max_row + 1):
+                this_row = this_location.get(nearby_row)
+                if this_row is not None:
+                    max_col = max(this_row.keys())
+                    for nearby_col in range(max_col + 1):
+                        this_col = this_row.get(nearby_col)
+                        if this_col is not None:
+                            all_labels.append(((nearby_col, nearby_row), this_col))  # Note that we only care about our current location
+        return all_labels
+    
+    def press_buttons(self, buttons: list[str], wait: bool, tool_id: str) -> dict[str, Any]:
+        self.text_display.add_message(f"[Buttons] Pressing: {buttons} (wait={wait})")
+        
+        result, last_coords = self.emulator.press_buttons(buttons, wait)
+        
+        self.last_coords = last_coords
+        
+        # Get game state from memory after the action
+        memory_info, location, coords = self.emulator.get_state_from_memory()
+        # Log the memory state after the tool call
+        logger.info(f"[Memory State after action]")
+        logger.info(memory_info)
+        
+        collision_map = self.emulator.get_collision_map()
+        if collision_map:
+            logger.info(f"[Collision Map after action]\n{collision_map}")
 
-    # TODO: An obvious refactor would be to move some of these into their own functions.
-    def process_tool_call(self, tool_call):
-        """Process a single tool call."""
-        tool_name = tool_call.name
-        if MODEL == "CLAUDE":
-            tool_input = tool_call.input
-            tool_id = tool_call.id
-        elif MODEL == "GEMINI":
-            tool_input = tool_call.args
-            tool_id = tool_call.id
-        elif MODEL == "OPENAI":
-            tool_input = json.loads(tool_call.arguments)
-            tool_id = tool_call.call_id
-            self.text_display.add_message(f"[Text] {tool_input['explanation_of_action']}")
-        logger.info(f"Processing tool call: {tool_name}")
+        # TODO: Maybe python has good queues for this, but queue is not iterable for display
+        self.location_history.insert(0, (location, coords))
+        if len(self.location_history) > self.location_history_length:
+            self.location_history.pop()
+        if self.location_tracker_activated:
+            cols = self.location_tracker.setdefault(location, [])
+            # This is leaning hard on Python list append optimization... Maybe there are better structures?
+            # col first
+            if coords[0] > len(cols) - 1:
+                if len(cols) == 0:
+                    cols.extend(list() for _ in range(0, coords[0] + 1))  # Note that you can't do []*coords[0], because then the same list goes into each entry
+                else:
+                    cols.extend([False for _ in range(0, len(cols[0]))] for _ in range(0, coords[0] + 1))
+            if coords[1] > len(cols[0]) - 1:
+                # this is awkward
+                for col in cols:
+                    # This is actually too much (it would be coords[1] - len(col) + 1) but the overallocation is probably a good idea.
+                    col.extend(False for _ in range(0, coords[1] + 1))
+            cols[coords[0]][coords[1]] = True
 
-        if tool_name == "press_buttons":
-            buttons = tool_input["buttons"]
-            wait = tool_input.get("wait", True)
-            self.text_display.add_message(f"[Buttons] Pressing: {buttons} (wait={wait})")
-            
-            result, last_coords = self.emulator.press_buttons(buttons, wait)
-            
-            self.last_coords = last_coords
-            
-            # Get game state from memory after the action
-            memory_info, location, coords = self.emulator.get_state_from_memory()
-            
-            # Log the memory state after the tool call
-            logger.info(f"[Memory State after action]")
-            logger.info(memory_info)
-            
-            collision_map = self.emulator.get_collision_map()
-            if collision_map:
-                logger.info(f"[Collision Map after action]\n{collision_map}")
-
-            # TODO: Maybe python has good queues for this, but queue is not iterable for display
-            self.location_history.insert(0, (location, coords))
-            if len(self.location_history) > self.location_history_length:
-                self.location_history.pop()
-            if self.location_tracker_activated:
-                cols = self.location_tracker.setdefault(location, [])
-                # This is leaning hard on Python list append optimization... Maybe there are better structures?
-                # col first
-                if coords[0] > len(cols) - 1:
-                    if len(cols) == 0:
-                        cols.extend(list() for _ in range(0, coords[0] + 1))  # Note that you can't do []*coords[0], because then the same list goes into each entry
-                    else:
-                        cols.extend([False for _ in range(0, len(cols[0]))] for _ in range(0, coords[0] + 1))
-                if coords[1] > len(cols[0]) - 1:
-                    # this is awkward
-                    for col in cols:
-                        # This is actually too much (it would be coords[1] - len(col) + 1) but the overallocation is probably a good idea.
-                        col.extend(False for _ in range(0, coords[1] + 1))
-                cols[coords[0]][coords[1]] = True
-
-            # TODO: eventually do this more reasonably. For now we do this extraordinarily dumb approach.
-            col = coords[0]
-            row = coords[1]
-            all_labels = []
-            this_location = self.label_archive.get(location)
-            if this_location is None:
-                # this sucks man
-                for key, value in self.label_archive.items():
-                    if location.lower() == key.lower():
-                        this_location = value
-                        break
-            if this_location is not None:
-                for nearby_row in range(max(0, row-10), row+11):
-                    this_row = this_location.get(nearby_row)
-                    if this_row is not None:
-                        for nearby_col in range(max(0, col-10), col+11):
-                            this_col = this_row.get(nearby_col)
-                            if this_col is not None:
-                                all_labels.append(((nearby_col, nearby_row), this_col))  # Note that we only care about our current location
+        all_labels = self.get_all_location_labels(location)
 
 
-            # Return tool result as a dictionary
-            # OPENAI doesn't know what to do with too much information here.
-            if MODEL == "OPENAI":
+        # Return tool result as a dictionary
+        # OPENAI doesn't know what to do with too much information here.
+        if MODEL == "OPENAI":
+            return {
+                "type": "tool_result",
+                "tool_use_id": tool_id,
+                "content": [
+                    {"type": "text", "text": (
+                        f"Pressed buttons: {', '.join(buttons)}"
+                    )}
+                ],
+            }
+        else:
+            # Get a fresh screenshot after executing the buttons
+            if self.detailed_navigator_mode and not self.emulator.get_in_combat():
+                # In navigator mode it gets confused if the screenshot/ASCII isn't in the user prompt, so we trim it to save tokens.
+                # TODO: That may not actually be true; there was another coding error. But this is already done so...
+                last_checkpoints = '\n'.join(self.checkpoints[-10:])
+                content = [
+                        {"type": "text", "text": f"Navigation result: {result}"},
+                        {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
+                        {"type": "text", "text": f"\nLabeled nearby locations: {','.join(f'{coords}: {label}' for coords, label in all_labels)}"},
+                        {"type": "text", "text": f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}"},
+                        {"type": "text", "text": f"Here are your last 10 checkpoints:\n{last_checkpoints}"},
+                        {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
+                    ]
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
-                    "content": [
-                        {"type": "text", "text": (
-                            f"Pressed buttons: {', '.join(buttons)}"
-                        )}
-                    ],
+                    "content": content,
                 }
             else:
-                # Get a fresh screenshot after executing the buttons
                 screenshot = self.emulator.get_screenshot()
                 screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
                 last_checkpoints = '\n'.join(self.checkpoints[-10:])
@@ -556,6 +558,28 @@ class SimpleAgent:
                     "tool_use_id": tool_id,
                     "content": content,
                 }
+
+
+    # TODO: An obvious refactor would be to move some of these into their own functions.
+    def process_tool_call(self, tool_call):
+        """Process a single tool call."""
+        tool_name = tool_call.name
+        if MODEL == "CLAUDE":
+            tool_input = tool_call.input
+            tool_id = tool_call.id
+        elif MODEL == "GEMINI":
+            tool_input = tool_call.args
+            tool_id = tool_call.id
+        elif MODEL == "OPENAI":
+            tool_input = json.loads(tool_call.arguments)
+            tool_id = tool_call.call_id
+            self.text_display.add_message(f"[Text] {tool_input['explanation_of_action']}")
+        logger.info(f"Processing tool call: {tool_name}")
+
+        if tool_name == "press_buttons":
+            buttons = tool_input["buttons"]
+            wait = tool_input.get("wait", True)
+            return self.press_buttons(buttons, wait, tool_id)
         elif tool_name == "navigate_to":
             row = tool_input["row"]
             col = tool_input["col"]
@@ -602,45 +626,24 @@ class SimpleAgent:
                 self.location_history.pop()
             if self.location_tracker_activated:
                 if coords[0] >= 0 or coords[1] >= 0:
-                    try:
-                        # Covers edge cases, principally when moving between areas.
-                        cols = self.location_tracker.setdefault(location, [])
-                        # This is leaning hard on Python list append optimization... Maybe there are better structures?
-                        # col first
-                        if coords[0] > len(cols) - 1:
-                            if len(cols) == 0:
-                                cols.extend(list() for _ in range(0, coords[0] + 1))  # Note that you can't do []*coords[0], because then the same list goes into each entry
-                            else:
-                                cols.extend([False for _ in range(0, len(cols[0]))] for _ in range(0, coords[0]))
-                        if coords[1] > len(cols[0]) - 1:
-                            # this is awkward
-                            for col in cols:
-                                # This is actually too much (it would be coords[1] - len(col) + 1) but the overallocation is probably a good idea.
-                                col.extend(False for _ in range(0, coords[1] + 1))
-                        cols[coords[0]][coords[1]] = True
-                    except IndexError as e:
-                        # I may have fixed this error, but leaving this here in case of debugging. Can remove eventually.
-                        breakpoint()
+                    # Covers edge cases, principally when moving between areas.
+                    cols = self.location_tracker.setdefault(location, [])
+                    # This is leaning hard on Python list append optimization... Maybe there are better structures?
+                    # col first
+                    if coords[0] > len(cols) - 1:
+                        if len(cols) == 0:
+                            cols.extend(list() for _ in range(0, coords[0] + 1))  # Note that you can't do []*coords[0], because then the same list goes into each entry
+                        else:
+                            cols.extend([False for _ in range(0, len(cols[0]))] for _ in range(0, coords[0]))
+                    if coords[1] > len(cols[0]) - 1:
+                        # this is awkward
+                        for col in cols:
+                            # This is actually too much (it would be coords[1] - len(col) + 1) but the overallocation is probably a good idea.
+                            col.extend(False for _ in range(0, coords[1] + 1))
+                    cols[coords[0]][coords[1]] = True
 
             # TODO: eventually do this more reasonably. For now we do this extraordinarily dumb approach.
-            col = coords[0]
-            row = coords[1]
-            all_labels = []
-            this_location = self.label_archive.get(location)
-            if this_location is None:
-                # this sucks man
-                for key, value in self.label_archive.items():
-                    if location.lower() == key.lower():
-                        this_location = value
-                        break
-            if this_location is not None:
-                for nearby_row in range(max(0, row-10), row+11):
-                    this_row = this_location.get(nearby_row)
-                    if this_row is not None:
-                        for nearby_col in range(max(0, col-10), col+11):
-                            this_col = this_row.get(nearby_col)
-                            if this_col is not None:
-                                all_labels.append(((nearby_col, nearby_row), this_col))  # Note that we only care about our current location
+            all_labels = self.get_all_location_labels(location)
 
             # Return tool result as a dictionary
             # OPENAI doesn't know what to do with too much information here.
