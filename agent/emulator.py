@@ -233,6 +233,21 @@ class Emulator:
         # We need to check sprites too as they will block traversal
         sprites = self.get_sprites()
 
+        # Special casing for warp tiles. If they're at a 0-coordinate we can safely assume the warp transition direction.
+        # otherwise I haven't figured out how to figure it out so we just tell the model all directions are valid and just
+        # deal with it.
+        reader = PokemonRedReader(self.pyboy.memory)
+        warp_coords = reader.get_warps()
+
+        # We need absolute coordinates to check warp.
+        player_coords = reader.read_coordinates()
+        if player_coords in warp_coords:
+            if player_coords[0] and player_coords[1]:  # They're both not 9
+                return ["up", "down", "left", "right"]  # I have no idea which directions are valid warps so we just fallback on yielding everything. Probably not even worth checking sprites.
+            if not player_coords[0]:
+                valid_moves.append("left")
+            if not player_coords[1]:  # there is a literal corner case where both are 0, but that never happens in Pokemon Red.
+                valid_moves.append("up")
         # Check each direction
         if terrain[3][4] != 0 and (4, 3) not in sprites:  # Up
             valid_moves.append("up")
