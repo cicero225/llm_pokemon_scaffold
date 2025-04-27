@@ -59,7 +59,6 @@ class Emulator:
         self.button_queue: queue.Queue
         self.pyboy_lock = PriorityLock()
         self.button_queue_clear = threading.Event()
-        self._is_initialized = False
 
     # pyboy just doesn't work unless it's ticking and receiving button presses on the same thread as it was initialoized on, so
     # if we want it to be able to run independently we have to resort to keeping it in its own little box like this (in a thread)
@@ -83,7 +82,6 @@ class Emulator:
         for _ in range(60):
             self.pyboy.tick(1)
         self.pyboy.set_emulation_speed(1)
-        self._is_initialized = True
         while True:
             with self.pyboy_lock(10):
                 try:
@@ -132,14 +130,16 @@ class Emulator:
         else:
             self.run_thread = threading.Thread(target=self.player, kwargs={"rom_path": rom_path, "headless": headless, "sound": sound})
             self.run_thread.start()
-            while True:
-                try:
-                    self.pyboy # geh
-                except AttributeError:
-                    time.sleep(0.1)
-                else:
-                    break
-        
+            self.wait_for_pyboy()
+
+    def wait_for_pyboy(self):
+        while True:
+            try:
+                self.pyboy # geh
+            except AttributeError:
+                time.sleep(0.1)
+            else:
+                break
 
     def get_screenshot(self):
         """Get the current screenshot. We wait for the queue to clear to make sure all buttons are pressed."""

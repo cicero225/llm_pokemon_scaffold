@@ -271,7 +271,7 @@ class SimpleAgent:
         self.pyboy_main_thread = pyboy_main_thread
         self.emulator_init_kwargs = {"rom_path": rom_path, "headless": headless, "sound": sound, "pyboy_main_thread": self.pyboy_main_thread}
         if not self.pyboy_main_thread:
-            self.emulator.initialize(**self.emulator_init_kwargs)  # Initialize the emulator
+            self.emulator.initialize(**self.emulator_init_kwargs)
         if MODEL == "CLAUDE" or MAPPING_MODEL == "CLAUDE":
             self.anthropic_client = Anthropic(api_key=API_CLAUDE, max_retries=10)
         if MODEL == "GEMINI" or MAPPING_MODEL == "GEMINI":
@@ -995,18 +995,13 @@ Pay attention to the following procedure when trying to reach a specific locatio
             thread.start()
 
             self.emulator.initialize(**self.emulator_init_kwargs) 
-            print('emulator.initialize done')
 
             return self._steps_completed
 
         logger.info(f"Starting agent loop for {num_steps} steps")
 
         if self.pyboy_main_thread:
-            while True:
-                if not self.emulator._is_initialized:
-                    time.sleep(0.1)
-                else:
-                    break
+            self.emulator.wait_for_pyboy()
 
             if self.load_state:
                 logger.info(f"Loading saved state from {self.load_state}")
