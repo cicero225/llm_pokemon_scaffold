@@ -9,7 +9,7 @@ import pickle
 from PIL import ImageDraw, ImageFilter
 import threading
 
-from config import MAX_TOKENS, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME
+from config import MAX_TOKENS, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME, MODEL, MAPPING_MODEL
 from agent.prompts import *
 from secret_api_keys import *
 from agent.emulator import Emulator
@@ -32,8 +32,6 @@ logger = logging.getLogger(__name__)
 
 BASE_IMAGE_SIZE = (160, 144)  # In tiles, 16 x 10 columns and 16 x 9 rows
 
-MODEL = "GEMINI"
-MAPPING_MODEL = "GEMINI"
 MAX_TOKENS_OPENAI = 50000
 
 # Handles making an automatically updating collision map of an area as the model paths through it.
