@@ -58,7 +58,7 @@ class Emulator:
         self.run_thread: threading.Thread
         self.button_queue: queue.Queue
         self.pyboy_lock = PriorityLock()
-        self.last_task_finished = threading.Event()
+        self.button_queue_clear = threading.Event()
 
     # pyboy just doesn't work unless it's ticking and receiving button presses on the same thread as it was initialoized on, so
     # if we want it to be able to run independently we have to resort to keeping it in its own little box like this (in a thread)
@@ -80,7 +80,7 @@ class Emulator:
         # Run the emulator for a short time to make sure it's ready
         self.pyboy.set_emulation_speed(0)
         for _ in range(60):
-            self.pyboy.tick(60)
+            self.pyboy.tick(1)
         self.pyboy.set_emulation_speed(1)
         while True:
             with self.pyboy_lock(10):
@@ -88,16 +88,18 @@ class Emulator:
                     # terrible hack. Maybe I should just do a function passing interface...
                     item, press_or_release = self.button_queue.get(block=False)
                     if item == "wait":
-                        if not self.pyboy.tick(press_or_release):
-                            self.last_task_finished.set()
-                            return
+                        for _ in range(press_or_release):
+                            if not self.pyboy.tick(1):
+                                if self.button_queue.empty():
+                                    self.button_queue_clear.set()
+                                return
                     elif item == "load_state":
                         self.pyboy.load_state(press_or_release)
                     elif item == "save_state":
                         self.pyboy.save_state(press_or_release)
                     elif item == "stop":
                         self.pyboy.stop()
-                        self.last_task_finished.set()
+                        self.button_queue_clear.set()
                         return
                     else:
                         if press_or_release:
@@ -106,10 +108,10 @@ class Emulator:
                             self.pyboy.button_release(item)
                 except queue.Empty:
                     if not self.pyboy.tick(1):
-                        self.last_task_finished.set()
+                        self.button_queue_clear.set()
                         return
-                self.last_task_finished.set()
-            
+                if self.button_queue.empty():
+                    self.button_queue_clear.set()
 
     """def tick(self, frames):
         # Advance the emulator by the specified number of frames.
@@ -124,16 +126,15 @@ class Emulator:
             try:
                 self.pyboy # geh
             except AttributeError:
-                time.sleep(0.6 + random.random())  # Trust me on the random being a good idea.
+                time.sleep(0.1)
             else:
                 break
         
 
     def get_screenshot(self):
         """Get the current screenshot. We wait for the queue to clear to make sure all buttons are pressed."""
-        while not self.button_queue.empty():
-            time.sleep(0.1)
-        time.sleep(1)  # this is just a good idea to wait for things to happen.
+        self.button_queue_clear.wait()
+        time.sleep(0.2 + random.random())  # this is just a good idea to wait for things to happen. Some randomization fixes arcane cases.
         return Image.fromarray(self.pyboy.screen.ndarray)
 
     def load_state(self, state_filename):
@@ -146,19 +147,19 @@ class Emulator:
         """
         # self.pyboy.load_state(open(state_filename, "rb"))
         with self.pyboy_lock(1):  # We really need to get this in correctly.
-            self.last_task_finished.clear()
+            self.button_queue_clear.clear()
             self.button_queue.put(("load_state", open(state_filename, "rb")))
-        self.last_task_finished.wait()
+        self.button_queue_clear.wait()
         logger.info("State loaded successfully.")
 
     def save_state(self, state_filename):
         with self.pyboy_lock(1):  # We really need to get this in correctly.
-            self.last_task_finished.clear()
+            self.button_queue_clear.clear()
             self.button_queue.put(("save_state", open(state_filename, "wb")))
-        self.last_task_finished.wait()
+        self.button_queue_clear.wait()
         logger.info("State saved successfully.")
 
-    def press_buttons(self, buttons, wait=True) -> tuple[str, tuple[int, int]]:
+    def press_buttons(self, buttons, wait=True, wait_for_finish=True) -> tuple[str, tuple[int, int]]:
         """Press a sequence of buttons on the Game Boy.
         
         Args:
@@ -179,6 +180,8 @@ class Emulator:
                 continue
             
             with self.pyboy_lock(1):
+                if wait_for_finish:
+                    self.button_queue_clear.clear()
                 # self.pyboy.button_press(button)
                 self.button_queue.put((button, True))
                 # self.tick(10)   # Press briefly
@@ -192,6 +195,8 @@ class Emulator:
                 else:
                     # self.tick(10)   # Brief pause between button presses
                     self.button_queue.put(("wait", 10))
+            if wait_for_finish:
+                self.button_queue_clear.wait()
                 
             results.append(f"Pressed {button}")
             cur_coords = self.get_coordinates()
@@ -681,6 +686,5 @@ class Emulator:
 
     def stop(self):
         with self.pyboy_lock(1):
-            self.last_task_finished.clear()
+            self.button_queue_clear.clear()
             self.button_queue.put(("stop", None))
-        self.last_task_finished.wait()

@@ -622,7 +622,7 @@ class SimpleAgent:
             next_coords = coords
             if path:
                 for direction in path:
-                    self.emulator.press_buttons([direction], True)
+                    self.emulator.press_buttons([direction], True, wait_for_finish=False)
                     cur_coords = self.emulator.get_coordinates()
                     if cur_coords != next_coords:
                         last_coords = next_coords
