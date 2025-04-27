@@ -1598,7 +1598,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
         if not self.emulator.get_in_combat():
             collision_map = self.update_and_get_full_collision_map(location, coords)
         else:
-            if location in self.full_collision_map[location]:
+            if location in self.full_collision_map:
                 collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []))
             else:
                 collision_map = "Not yet available"
