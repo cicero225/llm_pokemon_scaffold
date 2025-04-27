@@ -16,24 +16,29 @@ The starter version included:
 
 This repo adds:
 
-- Support for o3/o4-mini and Gemini-2.5
-- Much more elaborate scaffold features
+- Support for o3/o4-mini and Gemini-2.5/2.5 Flash
+- Much more elaborate scaffold features:
 
 New features include (works for all LLMs):
 
-1. A running ASCII collision map of each location is made as the LLM explores and is provided to the LLM
-   1a. Very handholdy—it also now gives numbers indicating how far away various tiles are
-2. Logging every time the LLM enters a new location for the first time
-3. An overlay inspired by both Claude and GeminiPlaysPokemon
-4. Labels automatically recorded on the map and in text when a location changes
-5. The LLM can "mark_checkpoint" to record achievements and keep track of progress
-6. The LLM can mark labels on the map as desired, which are recorded for the future
-7. A new more elaborate 3-stage "Meta-Critique LLM" that shows up at context summary and tries to keep an organized accounting of game state and facts
-8. A Navigation Assist tool, which is just an instance of the LLM instructed to study the ASCII map carefully and look for where to go
-9. Separate emulator threading, so it will keep running while the agent is thinking rather than pausing
-10. A new tool that will auto-path the LLM to a location in an area that it knows the coordinates of  
+Reasoning Aids
+1. A new more elaborate 3-stage "Meta-Critique LLM" that shows up at context summary and tries to keep an organized accounting of game state and facts -- this greatly helps keep the model on track, but uses its inherent knowledge of Red
+2. A checkpoint log to keep a history of events (and prevent hallucinations.)
+   * The model uses "mark_checkpoint" to record these
+
+Navigation Aids
+1. A running ASCII collision map of each location is made as the LLM explores and is provided to the models
+   1a. Very handholdy--it also now gives numbers indicating how far away various tiles are to reach.
+2. An overlay inspired by both Claude and GeminiPlaysPokemon
+3. Labels automatically recorded on the map and in text when a location changes. The model can also add labels as desired.
+4. A Detailed Navigator tool, which is just an instance of the model instructed to study the ASCII map carefully and look for where to go, without being told where (this helps in mazes)
+5. A new tool that will auto-path the LLM to a location in an area that it knows the coordinates of.
    10a. This could have been done instructing the LLM to verbally run the algorithm, but is very token-expensive and slow. You can switch it back to the LLM in config (note: you'll have to jack up the tokens in the code and implement streaming for it work for great distances)
-11. Numerous small scaffold improvements (like not lying to the LLM about its available moves at the edge of warp boundaries or next to Sprites)
+6. Numerous small scaffold improvements (like not lying to the model about its available moves at the edge of warp boundaries or next to Sprites.)
+
+Quality of Life:
+1. Logging every time the LLM enters a new location for the first time, for tracking progress.
+2. Separate emulator threading, so it will keep running while the agent is thinking rather than pausing.
 
 Features NOT included (that you may be familiar with from e.g. ClaudePlaysPokemon):
 
@@ -55,6 +60,8 @@ Recommended Python 3.11. That's how this was written and I think >3.11 breaks th
 4. Place your Pokemon Red Color Hack ROM file in the root directory (you need to provide your own ROM)
 
 ## Usage
+
+Check config.py for key model configuration settings you may want to change (like what model to use)
 
 Run the main script:
 
