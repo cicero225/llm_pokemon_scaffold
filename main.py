@@ -50,7 +50,13 @@ def main():
         default=None, 
         help="Path to a saved state to load"
     )
-    
+    parser.add_argument(
+        "--pyboy-main-thread", 
+        default=False, 
+        action="store_true",
+        help="Run pyboy in the main thread"
+    )
+
     args = parser.parse_args()
     
     # Get absolute path to ROM
@@ -75,7 +81,8 @@ def main():
         sound=args.sound if args.display else False,
         max_history=args.max_history,
         load_state=args.load_state,
-        location_archive_file_name="locations.pkl"
+        location_archive_file_name="locations.pkl",
+        pyboy_main_thread=args.pyboy_main_thread
     )
 
     try:

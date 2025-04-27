@@ -8,6 +8,7 @@ import os
 import pickle
 from PIL import ImageDraw, ImageFilter
 import threading
+import time
 
 from config import MAX_TOKENS, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME, MODEL, MAPPING_MODEL
 from agent.prompts import *
@@ -246,7 +247,18 @@ class TextDisplay:
 
 
 class SimpleAgent:
-    def __init__(self, rom_path, headless=True, sound=False, max_history=60, load_state=None, location_history_length=40, location_archive_file_name: Optional[str]=None, use_full_collision_map: bool=True):
+    def __init__(
+        self, 
+        rom_path, 
+        headless=True, 
+        sound=False, 
+        max_history=60, 
+        load_state=None, 
+        location_history_length=40, 
+        location_archive_file_name: Optional[str]=None, 
+        use_full_collision_map: bool=True,
+        pyboy_main_thread: bool=False
+    ):
         """Initialize the simple agent.
 
         Args:
@@ -256,7 +268,10 @@ class SimpleAgent:
             max_history: Maximum number of messages in history before summarization
         """
         self.emulator = Emulator()
-        self.emulator.initialize(rom_path, headless, sound)  # Initialize the emulator
+        self.pyboy_main_thread = pyboy_main_thread
+        self.emulator_init_kwargs = {"rom_path": rom_path, "headless": headless, "sound": sound, "pyboy_main_thread": self.pyboy_main_thread}
+        if not self.pyboy_main_thread:
+            self.emulator.initialize(**self.emulator_init_kwargs)  # Initialize the emulator
         if MODEL == "CLAUDE" or MAPPING_MODEL == "CLAUDE":
             self.anthropic_client = Anthropic(api_key=API_CLAUDE, max_retries=10)
         if MODEL == "GEMINI" or MAPPING_MODEL == "GEMINI":
@@ -964,13 +979,28 @@ Pay attention to the following procedure when trying to reach a specific locatio
             }
 
 
-    def run(self, num_steps=1, save_every=10, save_file_name: Optional[str] = None):
+    def run(self, num_steps=1, save_every=10, save_file_name: Optional[str] = None, _running_in_thread=False):
         """Main agent loop.
 
         Args:
             num_steps: Number of steps to run for
         """
+
+        if self.pyboy_main_thread and not _running_in_thread:
+            thread = threading.Thread(target=self.run, kwargs={"num_steps": num_steps, "save_every": save_every, "save_file_name": save_file_name, "_running_in_thread": True})
+            thread.start()
+
+            self.emulator.initialize(**self.emulator_init_kwargs) 
+
+            return thread.run()
         logger.info(f"Starting agent loop for {num_steps} steps")
+
+        if self.pyboy_main_thread:
+            while True:
+                if not self.emulator._is_initialized:
+                    time.sleep(0.1)
+                else:
+                    break
 
         # start emulator loop
         steps_completed = 0

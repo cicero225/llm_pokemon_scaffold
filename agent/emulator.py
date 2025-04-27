@@ -59,6 +59,7 @@ class Emulator:
         self.button_queue: queue.Queue
         self.pyboy_lock = PriorityLock()
         self.button_queue_clear = threading.Event()
+        self._is_initialized = False
 
     # pyboy just doesn't work unless it's ticking and receiving button presses on the same thread as it was initialoized on, so
     # if we want it to be able to run independently we have to resort to keeping it in its own little box like this (in a thread)
@@ -82,11 +83,13 @@ class Emulator:
         for _ in range(60):
             self.pyboy.tick(1)
         self.pyboy.set_emulation_speed(1)
+        self._is_initialized = True
         while True:
             with self.pyboy_lock(10):
                 try:
                     # terrible hack. Maybe I should just do a function passing interface...
                     item, press_or_release = self.button_queue.get(block=False)
+                    print(f"button queue: {item}, {press_or_release}")
                     if item == "wait":
                         for _ in range(press_or_release):
                             if not self.pyboy.tick(1):
@@ -110,6 +113,10 @@ class Emulator:
                     if not self.pyboy.tick(1):
                         self.button_queue_clear.set()
                         return
+                except KeyboardInterrupt:
+                    self.stop()
+                    break
+
                 if self.button_queue.empty():
                     self.button_queue_clear.set()
 
@@ -118,17 +125,20 @@ class Emulator:
         for _ in range(frames):
             self.pyboy.tick()"""
 
-    def initialize(self, rom_path, headless=True, sound=False):
+    def initialize(self, rom_path, headless=True, sound=False, pyboy_main_thread=False):
         """Initialize the emulator."""
-        self.run_thread = threading.Thread(target=self.player, kwargs={"rom_path": rom_path, "headless": headless, "sound": sound})
-        self.run_thread.start()
-        while True:
-            try:
-                self.pyboy # geh
-            except AttributeError:
-                time.sleep(0.1)
-            else:
-                break
+        if pyboy_main_thread:
+            self.player(rom_path=rom_path, headless=headless, sound=sound)
+        else:
+            self.run_thread = threading.Thread(target=self.player, kwargs={"rom_path": rom_path, "headless": headless, "sound": sound})
+            self.run_thread.start()
+            while True:
+                try:
+                    self.pyboy # geh
+                except AttributeError:
+                    time.sleep(0.1)
+                else:
+                    break
         
 
     def get_screenshot(self):
