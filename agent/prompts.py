@@ -115,17 +115,7 @@ It is important to understand the grid system used on the ASCII map and for the 
 Some example reasoning: If the top left of the ASCII map is at (3, 38), then we are at least 38 units away from the top of the map. This is
 relevant when looking for exits on the north or left of the map.
 
-The numbers on the map indicate how far away any given tile is from the player character.
-
-#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
-Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
-    2a. If not, instead find a nearby location labeled with a number
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
-4. Navigate via the REVERSE of this path.
-###########################################
+The numbers on the map indicate how far away any given tile is from the player character in terms of actual walking paths (not raw distance).
 
 An important subgoal in every new location is to thoroughly explore the area. In mazes, it is often faster to find the exit by EXPLORING rather than
 trying to go straight for the exit. Make sure to emphasize this when looking at your ASCII map, and include it in your goals in large maps.
@@ -275,17 +265,11 @@ VERY IMPORTANT: IF you know the coordinates of where you're trying to go, rememb
 REMEMBER TO CHECK "Labeled nearby location" for location coordinates.
     NOTE: This may not work on the very first try. Be patient! Try a few times.
 
-#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
-Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
-    2a. If not, instead find a nearby location labeled with a number
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
-4. Navigate via the REVERSE of this path.
-###########################################
+#### SPECIAL TIP FOR ASCII MAP #####
+The StepsToReach number is a guide to help you reach places. Viable paths all require going through StepsToReach 1, 2, 3....
 
-NOTE: the numbers show you possible paths to various locations. It is still up to you to choose which way to go.
+When navigating to locations on the map, pay attention to whether a valid path like this exists. You may have to choose a different direction!
+###########################################
 
 The conversation history may occasionally be summarized to save context space. If you see a message labeled "CONVERSATION HISTORY SUMMARY", this contains the key information about your progress so far. Use this information to maintain continuity in your gameplay.
 The percentages in the summary indicate how reliable each statement is.
@@ -351,18 +335,13 @@ VERY IMPORTANT: When navigating the ASCII map is MORE TRUSTWORTHY than your visi
 VERY IMPORTANT: IF you know the coordinates of where you're trying to go, remember that the "navigate_to_offscreen_coordinate" can provide you detailed instructions.
 REMEMBER TO CHECK "Labeled nearby location" for location coordinates.
     NOTE: This may not work on the very first try. Be patient! Try a few times.
+VERY IMPORTANT: Exploring unvisited tiles is a TOP priority. Make sure to take the time to check unvisited tiles, etc.
 
-#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
-Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
-    2a. If not, instead find a nearby location labeled with a number
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
-4. Navigate via the REVERSE of this path.
+#### SPECIAL TIP FOR ASCII MAP #####
+The StepsToReach number is a guide to help you reach places. Viable paths all require going through StepsToReach 1, 2, 3....
+
+When navigating to locations on the map, pay attention to whether a valid path like this exists. You may have to choose a different direction!
 ###########################################
-
-NOTE: the numbers show you possible paths to various locations. It is still up to you to choose which way to go.
 
 The conversation history may occasionally be summarized to save context space. If you see a message labeled "CONVERSATION HISTORY SUMMARY", this contains the key information about your progress so far. Use this information to maintain continuity in your gameplay.
 The percentages in the summary indicate how reliable each statement is.
@@ -409,7 +388,7 @@ Action to take.
 
 Tool usage instructions (READ CAREFULLY):
 
-detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300. DO NOT USE THIS IN CITIES OR BUILDINGS.
+detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300.
 
 tips for this tool:
 1. Provide the location that you had a map for. For instance, if it was PEWTER CITY, provide PEWTER CITY. This may not be your current RAM location.
