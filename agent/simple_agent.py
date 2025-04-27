@@ -155,13 +155,23 @@ class LocationCollisionMap:
         # now reverse and return
         button_list.reverse()
         return button_list
+    
+    @staticmethod
+    def make_ascii_segment(input_str: str, width: int, col: int, row: int):
+        # Basically output ascii map blocks of a consistent width, using a given input_str and local coordinates. Also adds | | on the two sides and includes it in the width.
+        base_str = f"{input_str}({col},{row})"
+        # pads always at the end.
+        if len(base_str) > width - 2:
+            raise ValueError("Not enough space to fit this!")
+        base_str += (width - 2 - len(base_str))*" "
+        return f"|{base_str}|"
 
     def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None) -> str:
-
         horizontal_labels = list(range(self.col_offset, self.col_offset+self.internal_map.shape[0]))
 
-
-        horizontal_border = "  +" + "".join(str(x) + " "*(4-len(str(x))) for x in horizontal_labels) + "+"
+        
+        row_width = 20
+        horizontal_border = "  +" + "".join(str(x) + " "*(row_width-len(str(x))) for x in horizontal_labels) + "+"
 
         lines = []
         # Add legend FIRST (better for models)
@@ -170,13 +180,12 @@ class LocationCollisionMap:
                 [
                     "",
                     "Legend:",
-                    "██ - Wall/Obstacle",
-                    "·· - CHECK HERE: Path/Walkable",
-                    "SS - Sprite",
-                    "PP - Player Character",
-                    "xx - AVOID GOING HERE - Already Explored",
-                    "uu - CHECK HERE: Blank = Unknown/Unvisited",
-                    "Numbers - How many tiles away this tile is to reach."
+                    "█ - Wall/Obstacle",
+                    "· - CHECK HERE: Path/Walkable",
+                    "S - Sprite",
+                    "P - Player Character",
+                    "x - AVOID GOING HERE - Already Explored",
+                    "u - CHECK HERE: Blank = Unknown/Unvisited"
                 ]
             )
         else:
@@ -184,11 +193,11 @@ class LocationCollisionMap:
                 [
                     "",
                     "Legend:",
-                    "██ - Wall/Obstacle",
-                    "·· - Path/Walkable",
-                    "SS - Sprite",
-                    "PP - Player Character",
-                    "uu - Blank = Unknown/Unvisited"
+                    "█ - Wall/Obstacle",
+                    "· - Path/Walkable",
+                    "S - Sprite",
+                    "P - Player Character",
+                    "u - Blank = Unknown/Unvisited"
                 ]
             )
 
@@ -198,9 +207,9 @@ class LocationCollisionMap:
             row = f"{str(real_row) + ' ' * (2 - len(str(real_row)))}|"
             for col_num, col in enumerate(this_row):
                 if col == -1:
-                    row += " uu "
+                    row += self.make_ascii_segment("Check here", row_width, real_col, real_row)
                 elif col == 0:
-                    row += " ██ "
+                    row += self.make_ascii_segment("Impassable", row_width, real_col, real_row)
                 elif col == 1:
                     real_col = self.col_offset + col_num
                     # Potentially place a distance marker:
@@ -208,13 +217,13 @@ class LocationCollisionMap:
                     if distance:  # removes 0 and None
                         row += str(distance) + " " * (4 - len(str(distance)))
                     elif local_location_tracker and real_col > -1 and real_row > -1 and real_col < len(local_location_tracker) and real_row < len(local_location_tracker[real_col]) and local_location_tracker[real_col][real_row]:
-                        row += " xx "
+                        row += self.make_ascii_segment("Explored", row_width, real_col, real_row)
                     else:
-                        row += " ·· "
+                        row += self.make_ascii_segment("Passable", row_width, real_col, real_row)
                 elif col == 2:
-                    row += " SS "
+                    row += self.make_ascii_segment("NPC/Object", row_width, real_col, real_row)
                 elif col == 3:
-                    row += " PP "
+                    row += self.make_ascii_segment("PLAYER", row_width, real_col, real_row)
             row += f"|{str(real_row)}"
             lines.append(row)
         lines.append(horizontal_border + f"({self.col_offset + self.internal_map.shape[0] - 1}, {self.row_offset + self.internal_map.shape[1] - 1})")
