@@ -1306,7 +1306,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     self.location_tracker = {}
                 _, location, _ = self.emulator.get_state_from_memory()
                 if self.last_location != location:
-                    if self.last_coords is not None and not self.emulator.get_in_combat():
+                    if self.last_coords is not None and not self.emulator.get_in_combat() and self.last_location is not None:
                         self.label_archive.setdefault(self.last_location, {}).setdefault(self.last_coords[1], {})[self.last_coords[0]] = f"Entrance to {location} (Approximate)"
                     self.steps_since_location_shift = 0
                     self.steps_since_label_reset = 0
