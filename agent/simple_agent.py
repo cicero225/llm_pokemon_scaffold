@@ -311,12 +311,16 @@ class SimpleAgent:
         self.steps_since_location_shift = 0
         self.no_navigate_here = ""
         self.navigation_location = ""
+        self._steps_completed = 0
+        self.load_state = load_state
 
-
-        if load_state:
+        if load_state and not self.pyboy_main_thread:
             logger.info(f"Loading saved state from {load_state}")
             self.emulator.load_state(load_state)
             self.load_location_archive(location_archive_file_name)
+        elif load_state:
+            self.load_location_archive(location_archive_file_name)
+
 
     # This does the overlay for the model.
     def get_screenshot_base64(
@@ -991,8 +995,10 @@ Pay attention to the following procedure when trying to reach a specific locatio
             thread.start()
 
             self.emulator.initialize(**self.emulator_init_kwargs) 
+            print('emulator.initialize done')
 
-            return thread.run()
+            return self._steps_completed
+
         logger.info(f"Starting agent loop for {num_steps} steps")
 
         if self.pyboy_main_thread:
@@ -1001,6 +1007,10 @@ Pay attention to the following procedure when trying to reach a specific locatio
                     time.sleep(0.1)
                 else:
                     break
+
+            if self.load_state:
+                logger.info(f"Loading saved state from {self.load_state}")
+                self.emulator.load_state(self.load_state)
 
         # start emulator loop
         steps_completed = 0
@@ -1379,8 +1389,15 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
             with open("location_milestones.txt", "w") as fw:
                 fw.write(str(self.location_milestones))
 
-        if not self.running:
+        if (
+            not self.running
+            # if the emulator is running in the main thread, we need to stop it
+            # to allow the main thread to exit the emulator loop
+            or self.pyboy_main_thread
+        ):
             self.emulator.stop()
+
+        self._steps_completed = steps_completed
 
         return steps_completed
 

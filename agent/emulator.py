@@ -89,7 +89,6 @@ class Emulator:
                 try:
                     # terrible hack. Maybe I should just do a function passing interface...
                     item, press_or_release = self.button_queue.get(block=False)
-                    print(f"button queue: {item}, {press_or_release}")
                     if item == "wait":
                         for _ in range(press_or_release):
                             if not self.pyboy.tick(1):
@@ -114,8 +113,9 @@ class Emulator:
                         self.button_queue_clear.set()
                         return
                 except KeyboardInterrupt:
-                    self.stop()
-                    break
+                    self.pyboy.stop()
+                    self.button_queue_clear.set()
+                    return
 
                 if self.button_queue.empty():
                     self.button_queue_clear.set()
