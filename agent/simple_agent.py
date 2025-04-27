@@ -1597,6 +1597,14 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
 
         all_labels = self.get_all_location_labels(location)
 
+        if not self.emulator.get_in_combat():
+            collision_map = self.update_and_get_full_collision_map(location, coords)
+        else:
+            if location in self.full_collision_map[location]:
+                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []))
+            else:
+                collision_map = "Not yet available"
+
         prompt = f"""
 Here is key game information:
 
@@ -1604,7 +1612,7 @@ RAM Information: {memory_info}
 
 Steps Since last Location Shift: {self.steps_since_location_shift}
 
-ASCII MAP: {self.update_and_get_full_collision_map(location, coords)}
+ASCII MAP: {collision_map}
 
 Last 10 Checkpoints: {last_checkpoints}
 
