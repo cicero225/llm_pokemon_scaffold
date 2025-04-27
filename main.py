@@ -2,7 +2,8 @@ import argparse
 import logging
 import os
 import time
-
+import sys 
+from typing import Literal
 from agent.simple_agent import SimpleAgent
 
 # Set up logging
@@ -51,9 +52,10 @@ def main():
         help="Path to a saved state to load"
     )
     parser.add_argument(
-        "--pyboy-main-thread", 
-        default=False, 
-        action="store_true",
+        "--main-thread-target", 
+        type=str, 
+        choices=["emulator", "agent", "auto"],
+        default="auto",
         help="Run pyboy in the main thread"
     )
 
@@ -74,6 +76,14 @@ def main():
     from pyboy import logging
     logging.log_level("DEBUG")
 
+    # default to running pyboy in the main thread on macOS
+    pyboy_main_thread = sys.platform == "darwin"
+
+    if args.main_thread_target == "emulator":
+        pyboy_main_thread = True
+    elif args.main_thread_target == "agent":
+        pyboy_main_thread = False
+
     # Create and run agent
     agent = SimpleAgent(
         rom_path=rom_path,
@@ -82,7 +92,7 @@ def main():
         max_history=args.max_history,
         load_state=args.load_state,
         location_archive_file_name="locations.pkl",
-        pyboy_main_thread=args.pyboy_main_thread
+        pyboy_main_thread=pyboy_main_thread
     )
 
     try:
