@@ -9,7 +9,7 @@ import pickle
 from PIL import ImageDraw, ImageFilter
 import threading
 
-from config import MAX_TOKENS, MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION
+from config import MAX_TOKENS, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME
 from agent.prompts import *
 from secret_api_keys import *
 from agent.emulator import Emulator
@@ -32,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 BASE_IMAGE_SIZE = (160, 144)  # In tiles, 16 x 10 columns and 16 x 9 rows
 
-MODEL = "CLAUDE"
-MAPPING_MODEL = "CLAUDE"
+MODEL = "GEMINI"
+MAPPING_MODEL = "GEMINI"
 MAX_TOKENS_OPENAI = 50000
 
 # Handles making an automatically updating collision map of an area as the model paths through it.
@@ -798,7 +798,7 @@ Pay attention to the following procedure when trying to reach a specific locatio
 
                 if MODEL == "CLAUDE":
                     response = self.anthropic_client.messages.create(
-                        model=MODEL_NAME,
+                        model=ANTHROPIC_MODEL_NAME,
                         max_tokens=20000,  # This is a difficult task that actually needs this...
                         messages=messages,
                         tools=DISTANT_NAVIGATOR_BUTTONS,
@@ -822,7 +822,7 @@ Pay attention to the following procedure when trying to reach a specific locatio
                             tools=GOOGLE_DISTANT_NAVIGATOR_BUTTONS
                         )
                     chat = self.gemini_client.chats.create(
-                        model="gemini-2.5-flash-preview-04-17",
+                        model=GEMINI_MODEL_NAME,
                         config=config
                     )   # context caching not available on gemini 2.5
                     retry_limit = 2
@@ -848,7 +848,7 @@ Pay attention to the following procedure when trying to reach a specific locatio
                     while cur_tries < retries:
                         try:
                             response = self.openai_client.responses.create(
-                                model="o3",
+                                model=OPENAI_MODEL_NAME,
                                 input=query,  # type: ignore
                                 max_output_tokens=MAX_TOKENS_OPENAI,
                                 temperature=TEMPERATURE,
@@ -1025,7 +1025,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                 if MODEL == "CLAUDE":
                     instructions = FULL_NAVIGATOR_PROMPT if self.detailed_navigator_mode and not self.emulator.get_in_combat() else SYSTEM_PROMPT
                     response = self.anthropic_client.messages.create(
-                        model=MODEL_NAME,
+                        model=ANTHROPIC_MODEL_NAME,
                         max_tokens=MAX_TOKENS,
                         system=instructions,
                         messages=messages,
@@ -1068,7 +1068,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                             tools=GOOGLE_NAVIGATOR_TOOLS if self.detailed_navigator_mode and not self.emulator.get_in_combat() else GOOGLE_TOOLS
                         )
                     chat = self.gemini_client.chats.create(
-                        model="gemini-2.5-flash-preview-04-17",
+                        model=GEMINI_MODEL_NAME,
                         history=google_messages[:-1],
                         config=config
                     )   # context caching not available on gemini 2.5
@@ -1136,7 +1136,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     while cur_tries < retries:
                         try:
                             response = self.openai_client.responses.create(
-                                model="o3",
+                                model=OPENAI_MODEL_NAME,
                                 input=messages_to_use,  # type: ignore
                                 instructions=instructions,
                                 max_output_tokens=MAX_TOKENS_OPENAI,
@@ -1459,7 +1459,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                 ]
             # Get text from Claude
             response = self.anthropic_client.messages.create(
-                model=MODEL_NAME,
+                model=ANTHROPIC_MODEL_NAME,
                 max_tokens=MAX_TOKENS,
                 system=instructions,
                 messages=messages,
@@ -1513,7 +1513,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     tools=GOOGLE_TOOLS
                 )
             chat = self.gemini_client.chats.create(
-                model="gemini-2.5-flash-preview-04-17",
+                model=GEMINI_MODEL_NAME,
                 history=google_messages,
                 config=config
             )   # context caching not available on gemini 2.5
@@ -1566,7 +1566,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     }
                 ]
             response = self.openai_client.responses.create(
-                model="o3",
+                model=OPENAI_MODEL_NAME,
                 input=messages,
                 instructions=instructions,
                 max_output_tokens=MAX_TOKENS_OPENAI,
