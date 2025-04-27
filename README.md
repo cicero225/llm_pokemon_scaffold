@@ -18,22 +18,22 @@ This repo adds:
 - Much more elaborate scaffold features:
 
 Reasoning Aids
-1. A new more elaborate 3-stage "Meta-Critique Claude" that shows up at context summary and tries to keep an organized accounting of game state and facts -- this greatly helps keep the model on track, but uses its inherent knowledge of Red
+1. A new more elaborate 3-stage "Meta-Critique LLM" that shows up at context summary and tries to keep an organized accounting of game state and facts -- this greatly helps keep the model on track, but uses its inherent knowledge of Red
 2. A checkpoint log to keep a history of events (and prevent hallucinations.)
    * The model uses "mark_checkpoint" to record these
 
 Navigation Aids
-1. A running ASCII collision map of each location is made as Claude explores and is provided to the models
+1. A running ASCII collision map of each location is made as the LLM explores and is provided to the models
    1a. Very handholdy--it also now gives numbers indicating how far away various tiles are to reach.
 2. An overlay inspired by both Claude and GeminiPlaysPokemon
 3. Labels automatically recorded on the map and in text when a location changes. The model can also add labels as desired.
 4. A Detailed Navigator tool, which is just an instance of the model instructed to study the ASCII map carefully and look for where to go, without being told where (this helps in mazes)
-5. A new tool that will auto-path Claude to a location in an area that it knows the coordinates of.
-   10a. This could have been done instructing Claude to verbally run the algorithm, but is very token-expensive and slow. You can switch it back to Claude in config (note: you'll have to jack up the tokens in the code and implement streaming for it work for great distances)
+5. A new tool that will auto-path the LLM to a location in an area that it knows the coordinates of.
+   10a. This could have been done instructing the LLM to verbally run the algorithm, but is very token-expensive and slow. You can switch it back to the LLM in config (note: you'll have to jack up the tokens in the code and implement streaming for it work for great distances)
 6. Numerous small scaffold improvements (like not lying to the model about its available moves at the edge of warp boundaries or next to Sprites.)
 
 Quality of Life:
-1. Logging every time Claude enters a new location for the first time, for tracking progress.
+1. Logging every time the LLM enters a new location for the first time, for tracking progress.
 2. Separate emulator threading, so it will keep running while the agent is thinking rather than pausing.
 
 Features NOT included (that you may be familiar with from e.g. ClaudePlaysPokemon):
