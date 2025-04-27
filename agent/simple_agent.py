@@ -1110,7 +1110,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                                     "text": (f"\nGame state information from memory after your action:\n{memory_info}"
                                             f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}" +
                                             f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}" +
-                                            f"Here are your last 10 checkpoints:\n{last_checkpoints}",
+                                            f"Here are your last 10 checkpoints:\n{last_checkpoints}" +
                                             f"You have been in this location for {self.steps_since_location_shift} steps"),
                                             
                                 },
