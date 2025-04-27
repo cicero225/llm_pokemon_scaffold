@@ -2,7 +2,7 @@
 
 ![LLM Pokémon Scaffold](https://res.cloudinary.com/lesswrong-2-0/image/upload/c_scale,w_250/f_auto,q_auto/v1/mirroredImages/8aPyKyRrMAQatFSnG/fcqugqcpuloqkloqz9bw)
 
-An agent harness that helps LLMs play Pokemon Red using the PyBoy emulator, forked from the [original starter code](<https://github.com/davidhershey/ClaudePlaysPokemonStarter/tree/main>) provided by David Hershey of Anthropic.
+An agent harness that helps LLMs play Pokémon Red using the PyBoy emulator, forked from the [original starter code](<https://github.com/davidhershey/ClaudePlaysPokemonStarter/tree/main>) provided by David Hershey of Anthropic.
 
 As seen on: [Research Notes: Running Claude 3.7, Gemini 2.5 Pro, and o3 on Pokémon Red](https://www.lesswrong.com/posts/8aPyKyRrMAQatFSnG).
 
@@ -109,3 +109,10 @@ Note: You may keyboard interrupt the bot at any time and it will *usually* autom
 4. The model responds with explanations and emulator commands
 5. The agent executes the commands and repeats the process
 6. Every once in a while when max_messages is reached, a summary call is made that also tries to do fact sorting and critiquing
+
+### License
+
+This project is licensed under the GNU General Public License v3.0 - see the
+LICENSE file for details. GPLv3 is a copyleft license: any derivate work not
+merely for personal use must also be open source. The original project by David
+Hershey of Anthropic was released without a license.
