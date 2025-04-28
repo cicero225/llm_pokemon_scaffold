@@ -580,7 +580,7 @@ class SimpleAgent:
         else:
             # Get a fresh screenshot after executing the buttons
             if self.detailed_navigator_mode and not self.emulator.get_in_combat():
-                # In navigator mode it gets confused if the screenshot/ASCII isn't in the user prompt, so we trim it to save tokens.
+                # In navigator mode it gets confused if the screenshot/text_based isn't in the user prompt, so we trim it to save tokens.
                 # TODO: That may not actually be true; there was another coding error. But this is already done so...
                 last_checkpoints = '\n'.join(self.checkpoints[-10:])
                 content = [
@@ -620,7 +620,7 @@ class SimpleAgent:
                 if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                     content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
                 if not self.emulator.get_in_combat() and self.use_full_collision_map:
-                    content.append({"type": "text", "text": "Here is an ASCII map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)})
+                    content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map(location, coords) + "\n\n[/TEXT_MAP]"})
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -728,7 +728,7 @@ class SimpleAgent:
             else:
                 # Get a fresh screenshot after executing the buttons
                 if self.detailed_navigator_mode and not self.emulator.get_in_combat():
-                    # In navigator mode it gets confused if the screenshot/ASCII isn't in the user prompt, so we trim it to save tokens.
+                    # In navigator mode it gets confused if the screenshot/text_based isn't in the user prompt, so we trim it to save tokens.
                     last_checkpoints = '\n'.join(self.checkpoints[-10:])
                     content = [
                             {"type": "text", "text": f"Navigation result: {result}"},
@@ -765,7 +765,7 @@ class SimpleAgent:
                             {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                         ]
                     if not self.emulator.get_in_combat() and self.use_full_collision_map:
-                        content.append({"type": "text", "text": "Here is an ASCII map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)})
+                        content.append({"type": "text", "text": "Here is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)})
                     if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                         content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
                     return {
@@ -794,17 +794,16 @@ class SimpleAgent:
                 buttons = self.full_collision_map[location].generate_buttons_to_coord(col, row)
                 wait = True
             else:
-                query = f"""Please take a look at the attached ASCII map.
+                query = f"""Please take a look at the attached text_based map.
 
     Please consider in detail how the player character (labeled PP) can reach the coordinate ({col},{row}). Keep the following in mind:
 
 #### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
 Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with the number {final_distance}.
-    2a. If not, instead find a nearby location
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
+1. Inspect the text_based map
+2. Find where your destination is on the map using the coordinate system (column, row).
+3. Trace a path from there back to the player character (PP) following the StepsToReach numbers on the map, in descending order.
+    3a. So if your destination is StepsToReach 20, then it is necessary to go through StepsToReach 19, StepsToReach 18...descending all the way to 1 and then PP.
 4. Navigate via the REVERSE of this path.
 ###########################################
 
@@ -817,7 +816,7 @@ Pay attention to the following procedure when trying to reach a specific locatio
     2. To get there, I would move up from (col, row)
     etc.
 
-    MAKE SURE TO PRINT OUT THE ENTIRE PATH IN TEXT.
+    MAKE SURE TO PRINT OUT THE ENTIRE PATH IN TEXT. AND DOUBLE-CHECK WHETHER YOUR ARE PASSING THROUGH IMPASSABLE TILES.
 
     then use the provided "press_buttons" tool to send the necessary commands. Remember that it will be in reverse order.
 
@@ -1161,7 +1160,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                                 },
                             ]
                         if not self.emulator.get_in_combat() and (self.use_full_collision_map or self.detailed_navigator_mode):
-                            content[0]['text'] += "\n\nHere is an ASCII map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)
+                            content[0]['text'] += "\n\nHere is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)
                         if self.emulator.get_in_combat() and self.detailed_navigator_mode:
                             # Only possible if navigator mode has been running.
                             content[0]['text'] += "\n\n "  + "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."
@@ -1654,7 +1653,7 @@ RAM Information: {memory_info}
 
 Steps Since last Location Shift: {self.steps_since_location_shift}
 
-ASCII MAP: {collision_map}
+text_based MAP: {collision_map}
 
 Last 10 Checkpoints: {last_checkpoints}
 
