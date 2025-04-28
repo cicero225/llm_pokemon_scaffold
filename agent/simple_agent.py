@@ -500,6 +500,8 @@ class SimpleAgent:
             if maybe_content is not None:
                 new_content = []
                 for entry in maybe_content:
+                    if isinstance(entry, str):
+                        continue
                     if entry["type"] == "image":
                         continue
                     elif entry["type"] == "text":
@@ -1209,6 +1211,8 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                         if maybe_content is not None:
                             new_content = []
                             for entry in maybe_content:
+                                if isinstance(entry, str):
+                                    continue
                                 if entry["type"] == "input_image":
                                     continue
                                 elif entry["type"] == "input_text":
