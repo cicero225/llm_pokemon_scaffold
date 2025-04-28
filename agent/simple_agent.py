@@ -280,7 +280,7 @@ class TextDisplay:
 
 
 class SimpleAgent:
-    def __init__(self, rom_path, headless=True, sound=False, max_history=60, load_state=None, location_history_length=40, location_archive_file_name: Optional[str]=None, use_full_collision_map: bool=True):
+    def __init__(self, rom_path, headless=True, sound=False, max_history=35, load_state=None, location_history_length=60, location_archive_file_name: Optional[str]=None, use_full_collision_map: bool=True):
         """Initialize the simple agent.
 
         Args:
@@ -490,6 +490,47 @@ class SimpleAgent:
                     self.navigator_message_history.pop()
                     break
         # TODO: Code for being able to restart gemini/openai with an interrupted tool call. Currently may glitch out in that scenario.
+
+    # Save tokens...
+    def strip_text_map_and_images_from_history(self, message_history: list[dict[str, Any]]) -> None:
+        # We go through everything that's not the most recent tool_result/message and clip out images and
+        # text_based maps to save tokens.
+        for message in message_history:
+            maybe_content = message["content"]
+            if maybe_content is not None:
+                new_content = []
+                for entry in maybe_content:
+                    if entry["type"] == "image":
+                        continue
+                    elif entry["type"] == "text":
+                        text = entry["text"]
+                        try:
+                            # Remove everything between [TEXT_MAP] tags
+                            first, second = text.split("[TEXT_MAP]")
+                            second, third = second.split("[/TEXT_MAP]")
+                            entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                        except Exception:
+                            pass
+                    elif entry["type"] == "tool_result":
+                        sub_content = []
+                        for sub_entry in entry["content"]:
+                            if sub_entry["type"] == "image":
+                                continue
+                            elif sub_entry["type"] == "text":
+                                text = sub_entry["text"]
+                                try:
+                                    # Remove everything between [TEXT_MAP] tags
+                                    first, second = text.split("[TEXT_MAP]")
+                                    second, third = second.split("[/TEXT_MAP]")
+                                    sub_entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                except Exception:
+                                    pass
+                            sub_content.append(sub_entry)
+                        entry["content"] = sub_content         
+                    new_content.append(entry)
+                message["content"] = new_content
+            else:
+                breakpoint()
 
     def update_and_get_full_collision_map(self, location, coords):
         collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
@@ -1028,9 +1069,12 @@ Pay attention to the following procedure when trying to reach a specific locatio
                     self.text_display.add_message("NAVIGATOR MODE")
                     screenshot = self.emulator.get_screenshot()
                     screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
+                    self.strip_text_map_and_images_from_history(self.navigator_message_history)
                     self.navigator_message_history.append({"role": "user", "content": [{"type": "text", "text": f"""
-ASCII map: 
+Text-based map:
+[TEXT_MAP]
 {self.update_and_get_full_collision_map(location, coords)}
+[/TEXT_MAP]
 
 Screenshot attached.
 
@@ -1048,6 +1092,29 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     messages = copy.deepcopy(self.navigator_message_history)
                     
                 else:
+                    # This is more complicated...We go through everything that's not the most recent tool_result/message and clip out images and
+                    # text_based maps to save tokens.
+                    for message in self.message_history:
+                        maybe_content = message["content"]
+                        if maybe_content is not None:
+                            new_content = []
+                            for entry in maybe_content:
+                                if entry["type"] == "image":
+                                    continue
+                                if entry["type"] == "text":
+                                    text = entry["text"]
+                                    try:
+                                        # Remove everything between [TEXT_MAP] tags
+                                        first, second = text.split("[TEXT_MAP]")
+                                        second, third = second.split("[/TEXT_MAP]")
+                                        entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                    except Exception:
+                                        pass
+                                new_content.append(entry)
+                            message["content"] = new_content
+                        else:
+                            breakpoint()
+                    self.strip_text_map_and_images_from_history(self.message_history)
                     messages = copy.deepcopy(self.message_history)
 
                 if len(messages) >= 3:
@@ -1134,6 +1201,43 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     # For openai we need to add a screenschot too to tool calls or it gets very confused.
                     # Get a fresh screenshot after executing the buttons
                     messages_to_use = self.openai_navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.openai_message_history
+                    
+                    # We go through everything that's not the most recent tool_result/message and clip out images and
+                    # text_based maps to save tokens.
+                    for message in messages_to_use:
+                        maybe_content = message["content"]
+                        if maybe_content is not None:
+                            new_content = []
+                            for entry in maybe_content:
+                                if entry["type"] == "input_image":
+                                    continue
+                                elif entry["type"] == "input_text":
+                                    text = entry["text"]
+                                    try:
+                                        # Remove everything between [TEXT_MAP] tags
+                                        first, second = text.split("[TEXT_MAP]")
+                                        second, third = second.split("[/TEXT_MAP]")
+                                        entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                    except Exception:
+                                        pass
+                                elif entry["type"] == "tool_result":
+                                    for sub_entry in entry["content"]:
+                                        if sub_entry["type"] == "input_image":
+                                            continue
+                                        if sub_entry["type"] == "input_text":
+                                            text = sub_entry["text"]
+                                            try:
+                                                # Remove everything between [TEXT_MAP] tags
+                                                first, second = text.split("[TEXT_MAP]")
+                                                second, third = second.split("[/TEXT_MAP]")
+                                                entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                            except Exception:
+                                                pass
+                                new_content.append(entry)
+                            message["content"] = new_content
+                        else:
+                            breakpoint()
+                    
                     if isinstance(messages_to_use[-1], dict) and messages_to_use[-1].get('type') == "function_call_output":
                         # Unfortunately this is buried...
                         # parsed_result = json.loads(self.openai_message_history[-1]["output"])
