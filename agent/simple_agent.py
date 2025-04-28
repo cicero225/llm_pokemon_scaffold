@@ -6,8 +6,7 @@ import logging
 import numpy as np
 import os
 import pickle
-from PIL import ImageDraw, ImageFilter
-import threading
+from PIL import ImageDraw, ImageFilter, Image
 
 from config import MAX_TOKENS, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME, MODEL, MAPPING_MODEL
 from agent.prompts import *
@@ -340,7 +339,7 @@ class SimpleAgent:
 
     # This does the overlay for the model.
     def get_screenshot_base64(
-            self, screenshot, upscale=1, add_coords: bool=True,
+            self, screenshot: Image.Image, upscale=1, add_coords: bool=True,
             player_coords: Optional[tuple[int, int]]=None, location: Optional[str]=None, relative_square_size=8):
         """Convert PIL image to base64 string."""
         # Resize if needed
@@ -366,6 +365,13 @@ class SimpleAgent:
         sprite_locations = self.emulator.get_sprites()
 
         if not self.emulator.get_in_combat():
+            shape = screenshot.size
+            # Draw some eye-searing lines across the image that nonetheless might make it more obvious to the LLM that this is a grid.
+            for x in range(0, shape[0], shape[0]//10):
+                ImageDraw.Draw(screenshot).line(((x, 0), (x, shape[1] - 1)), fill=(255, 0, 0))
+            for y in range(0, shape[1], shape[1]//9):
+                ImageDraw.Draw(screenshot).line(((0, y), (shape[0] - 1, y)), fill=(255, 0, 0))
+
             # add coordinate labels (note: if scale is too small it may be unreadable)
             # The assumption is the central square is the player's current location, which is 4, 4
             # Rows 0 - 8, Cols 0 - 9
@@ -1360,7 +1366,10 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     location_archive = self.label_archive.get(location)
                     if location_archive:
                         for key, value in location_archive.items():
-                            if "approximate" not in value.lower():
+                            for key2, value2 in value.items():
+                                if "approximate" not in value2.lower():
+                                    del value[key2]
+                            if not value:
                                 del location_archive[key]
                 logger.info(f"Completed step {steps_completed}/{num_steps}")
                 self.text_display.add_message(f"Absolute step count: {self.absolute_step_count}")
