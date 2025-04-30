@@ -110,6 +110,11 @@ class Emulator:
                     if not self.pyboy.tick(1):
                         self.button_queue_clear.set()
                         return
+                except KeyboardInterrupt:
+                    self.pyboy.stop()
+                    self.button_queue_clear.set()
+                    return
+
                 if self.button_queue.empty():
                     self.button_queue_clear.set()
 
@@ -118,10 +123,16 @@ class Emulator:
         for _ in range(frames):
             self.pyboy.tick()"""
 
-    def initialize(self, rom_path, headless=True, sound=False):
+    def initialize(self, rom_path, headless=True, sound=False, pyboy_main_thread=False):
         """Initialize the emulator."""
-        self.run_thread = threading.Thread(target=self.player, kwargs={"rom_path": rom_path, "headless": headless, "sound": sound})
-        self.run_thread.start()
+        if pyboy_main_thread:
+            self.player(rom_path=rom_path, headless=headless, sound=sound)
+        else:
+            self.run_thread = threading.Thread(target=self.player, kwargs={"rom_path": rom_path, "headless": headless, "sound": sound})
+            self.run_thread.start()
+            self.wait_for_pyboy()
+
+    def wait_for_pyboy(self):
         while True:
             try:
                 self.pyboy # geh
@@ -129,7 +140,6 @@ class Emulator:
                 time.sleep(0.1)
             else:
                 break
-        
 
     def get_screenshot(self):
         """Get the current screenshot. We wait for the queue to clear to make sure all buttons are pressed."""
