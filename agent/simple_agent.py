@@ -6,7 +6,7 @@ import logging
 import numpy as np
 import os
 import pickle
-from PIL import ImageDraw, ImageFilter
+from PIL import ImageDraw, ImageFilter, Image
 import threading
 import time
 
@@ -156,18 +156,33 @@ class LocationCollisionMap:
         # now reverse and return
         button_list.reverse()
         return button_list
+    
+    @staticmethod
+    def make_ascii_segment(input_str: str, width: int, col: int, row: int):
+        # Basically output ascii map blocks of a consistent width, using a given input_str and local coordinates. Also adds | on the front side and includes it in the width.
+        base_str = f"{input_str}({col},{row})"
+        # pads always at the end.
+        if len(base_str) > width - 1:
+            raise ValueError("Not enough space to fit this!")
+        base_str += (width - 1 - len(base_str))*" "
+        return f"|{base_str}"
 
     def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None) -> str:
 
+        # We prepare two identical versions simultaneously: A readable nice ASCII for humans, and the long-winded one for models
+
         horizontal_labels = list(range(self.col_offset, self.col_offset+self.internal_map.shape[0]))
 
-
-        horizontal_border = "  +" + "".join(str(x) + " "*(4-len(str(x))) for x in horizontal_labels) + "+"
+        
+        row_width = 35
+        horizontal_border = "       +" + "".join("Column " + str(x) + " "*(row_width - len(str(x)) - 7) for x in horizontal_labels) + "+"
+        horizontal_border_human = "       +" + "".join(str(x) + " "*(4-len(str(x))) for x in horizontal_labels) + "+"
 
         lines = []
-        # Add legend FIRST (better for models)
+        lines_human = []
+        # Add legend to human version
         if local_location_tracker:
-            lines.extend(
+            lines_human.extend(
                 [
                     "",
                     "Legend:",
@@ -181,7 +196,7 @@ class LocationCollisionMap:
                 ]
             )
         else:
-            lines.extend(
+            lines_human.extend(
                 [
                     "",
                     "Legend:",
@@ -194,36 +209,56 @@ class LocationCollisionMap:
             )
 
         lines += [f"({self.col_offset}, {self.row_offset})", horizontal_border]
+        lines_human += [f"({self.col_offset}, {self.row_offset})", horizontal_border_human]
         for row_num, this_row in enumerate(self.internal_map.transpose()):  # transposing makes printing easier
             real_row = self.row_offset + row_num
-            row = f"{str(real_row) + ' ' * (2 - len(str(real_row)))}|"
+            row = f"Row: {str(real_row) + ' ' * (2 - len(str(real_row)))}"
+            row_human = row + "|"
             for col_num, col in enumerate(this_row):
+                real_col = self.col_offset + col_num
                 if col == -1:
-                    row += " uu "
+                    row += self.make_ascii_segment("Check here", row_width, real_col, real_row)
+                    row_human += " uu "
                 elif col == 0:
-                    row += " ██ "
-                elif col == 1:
-                    real_col = self.col_offset + col_num
+                    row += self.make_ascii_segment("Impassable", row_width, real_col, real_row)
+                    row_human += " ██ "
+                elif col == 1: 
                     # Potentially place a distance marker:
+                    row_piece = ""
+                    row_piece_human = ""
                     distance = self.distances.get((real_col, real_row))
                     if distance:  # removes 0 and None
-                        row += str(distance) + " " * (4 - len(str(distance)))
-                    elif local_location_tracker and real_col > -1 and real_row > -1 and real_col < len(local_location_tracker) and real_row < len(local_location_tracker[real_col]) and local_location_tracker[real_col][real_row]:
-                        row += " xx "
+                        row_piece += "StepsToReach:" + str(distance) + " " * (4 - len(str(distance))) + " "
+                        row_piece_human += str(distance) + " " * (4 - len(str(distance)))
+                    if local_location_tracker and real_col > -1 and real_row > -1 and real_col < len(local_location_tracker) and real_row < len(local_location_tracker[real_col]) and local_location_tracker[real_col][real_row]:
+                        row_piece += "Explored"
+                        if not row_piece_human:
+                            row_human += " xx "
                     else:
-                        row += " ·· "
+                        row_piece += "Passable"
+                        if not row_piece_human:
+                            row_human += " ·· "
+                    row += self.make_ascii_segment(row_piece, row_width, real_col, real_row)
+                    row_human += row_piece_human
                 elif col == 2:
-                    row += " SS "
+                    row += self.make_ascii_segment("NPC/Object", row_width, real_col, real_row)
+                    row_human += " SS "
                 elif col == 3:
-                    row += " PP "
+                    row += self.make_ascii_segment("PLAYER", row_width, real_col, real_row)
+                    row_human += " PP "
             row += f"|{str(real_row)}"
+            row_human += f"|{str(real_row)}"
             lines.append(row)
+            lines_human.append(row_human)
         lines.append(horizontal_border + f"({self.col_offset + self.internal_map.shape[0] - 1}, {self.row_offset + self.internal_map.shape[1] - 1})")
+        lines_human.append(horizontal_border_human + f"({self.col_offset + self.internal_map.shape[0] - 1}, {self.row_offset + self.internal_map.shape[1] - 1})")
 
 
         # Join all lines with newlines
         output = "\n".join(lines)
         with open("mapping_log.txt", "w", encoding="utf-8") as fw:
+            fw.write("\n".join(lines_human))
+            fw.write("\n\n" + "MODEL VERSION:" +"\n\n")
             fw.write(output)
         return output
 
@@ -324,7 +359,7 @@ class SimpleAgent:
 
     # This does the overlay for the model.
     def get_screenshot_base64(
-            self, screenshot, upscale=1, add_coords: bool=True,
+            self, screenshot: Image.Image, upscale=1, add_coords: bool=True,
             player_coords: Optional[tuple[int, int]]=None, location: Optional[str]=None, relative_square_size=8):
         """Convert PIL image to base64 string."""
         # Resize if needed
@@ -350,6 +385,13 @@ class SimpleAgent:
         sprite_locations = self.emulator.get_sprites()
 
         if not self.emulator.get_in_combat():
+            shape = screenshot.size
+            # Draw some eye-searing lines across the image that nonetheless might make it more obvious to the LLM that this is a grid.
+            for x in range(0, shape[0], shape[0]//10):
+                ImageDraw.Draw(screenshot).line(((x, 0), (x, shape[1] - 1)), fill=(255, 0, 0))
+            for y in range(0, shape[1], shape[1]//9):
+                ImageDraw.Draw(screenshot).line(((0, y), (shape[0] - 1, y)), fill=(255, 0, 0))
+
             # add coordinate labels (note: if scale is too small it may be unreadable)
             # The assumption is the central square is the player's current location, which is 4, 4
             # Rows 0 - 8, Cols 0 - 9
@@ -469,6 +511,49 @@ class SimpleAgent:
                     break
         # TODO: Code for being able to restart gemini/openai with an interrupted tool call. Currently may glitch out in that scenario.
 
+    # Save tokens...
+    def strip_text_map_and_images_from_history(self, message_history: list[dict[str, Any]]) -> None:
+        # We go through everything that's not the most recent tool_result/message and clip out images and
+        # text_based maps to save tokens.
+        for message in message_history:
+            maybe_content = message["content"]
+            if maybe_content is not None:
+                new_content = []
+                for entry in maybe_content:
+                    if isinstance(entry, str):
+                        continue
+                    if entry["type"] == "image":
+                        continue
+                    elif entry["type"] == "text":
+                        text = entry["text"]
+                        try:
+                            # Remove everything between [TEXT_MAP] tags
+                            first, second = text.split("[TEXT_MAP]")
+                            second, third = second.split("[/TEXT_MAP]")
+                            entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                        except Exception:
+                            pass
+                    elif entry["type"] == "tool_result":
+                        sub_content = []
+                        for sub_entry in entry["content"]:
+                            if sub_entry["type"] == "image":
+                                continue
+                            elif sub_entry["type"] == "text":
+                                text = sub_entry["text"]
+                                try:
+                                    # Remove everything between [TEXT_MAP] tags
+                                    first, second = text.split("[TEXT_MAP]")
+                                    second, third = second.split("[/TEXT_MAP]")
+                                    sub_entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                except Exception:
+                                    pass
+                            sub_content.append(sub_entry)
+                        entry["content"] = sub_content         
+                    new_content.append(entry)
+                message["content"] = new_content
+            else:
+                breakpoint()
+
     def update_and_get_full_collision_map(self, location, coords):
         collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
         downsampled_terrain = self.emulator._downsample_array(collision_map)
@@ -558,7 +643,7 @@ class SimpleAgent:
         else:
             # Get a fresh screenshot after executing the buttons
             if self.detailed_navigator_mode and not self.emulator.get_in_combat():
-                # In navigator mode it gets confused if the screenshot/ASCII isn't in the user prompt, so we trim it to save tokens.
+                # In navigator mode it gets confused if the screenshot/text_based isn't in the user prompt, so we trim it to save tokens.
                 # TODO: That may not actually be true; there was another coding error. But this is already done so...
                 last_checkpoints = '\n'.join(self.checkpoints[-10:])
                 content = [
@@ -598,7 +683,7 @@ class SimpleAgent:
                 if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                     content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
                 if not self.emulator.get_in_combat() and self.use_full_collision_map:
-                    content.append({"type": "text", "text": "Here is an ASCII map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)})
+                    content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map(location, coords) + "\n\n[/TEXT_MAP]"})
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -706,7 +791,7 @@ class SimpleAgent:
             else:
                 # Get a fresh screenshot after executing the buttons
                 if self.detailed_navigator_mode and not self.emulator.get_in_combat():
-                    # In navigator mode it gets confused if the screenshot/ASCII isn't in the user prompt, so we trim it to save tokens.
+                    # In navigator mode it gets confused if the screenshot/text_based isn't in the user prompt, so we trim it to save tokens.
                     last_checkpoints = '\n'.join(self.checkpoints[-10:])
                     content = [
                             {"type": "text", "text": f"Navigation result: {result}"},
@@ -743,7 +828,7 @@ class SimpleAgent:
                             {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                         ]
                     if not self.emulator.get_in_combat() and self.use_full_collision_map:
-                        content.append({"type": "text", "text": "Here is an ASCII map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)})
+                        content.append({"type": "text", "text": "Here is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)})
                     if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                         content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
                     return {
@@ -772,17 +857,16 @@ class SimpleAgent:
                 buttons = self.full_collision_map[location].generate_buttons_to_coord(col, row)
                 wait = True
             else:
-                query = f"""Please take a look at the attached ASCII map.
+                query = f"""Please take a look at the attached text_based map.
 
     Please consider in detail how the player character (labeled PP) can reach the coordinate ({col},{row}). Keep the following in mind:
 
 #### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
 Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with the number {final_distance}.
-    2a. If not, instead find a nearby location
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
+1. Inspect the text_based map
+2. Find where your destination is on the map using the coordinate system (column, row).
+3. Trace a path from there back to the player character (PP) following the StepsToReach numbers on the map, in descending order.
+    3a. So if your destination is StepsToReach 20, then it is necessary to go through StepsToReach 19, StepsToReach 18...descending all the way to 1 and then PP.
 4. Navigate via the REVERSE of this path.
 ###########################################
 
@@ -795,7 +879,7 @@ Pay attention to the following procedure when trying to reach a specific locatio
     2. To get there, I would move up from (col, row)
     etc.
 
-    MAKE SURE TO PRINT OUT THE ENTIRE PATH IN TEXT.
+    MAKE SURE TO PRINT OUT THE ENTIRE PATH IN TEXT. AND DOUBLE-CHECK WHETHER YOUR ARE PASSING THROUGH IMPASSABLE TILES.
 
     then use the provided "press_buttons" tool to send the necessary commands. Remember that it will be in reverse order.
 
@@ -1023,9 +1107,12 @@ Pay attention to the following procedure when trying to reach a specific locatio
                     self.text_display.add_message("NAVIGATOR MODE")
                     screenshot = self.emulator.get_screenshot()
                     screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
+                    self.strip_text_map_and_images_from_history(self.navigator_message_history)
                     self.navigator_message_history.append({"role": "user", "content": [{"type": "text", "text": f"""
-ASCII map: 
+Text-based map:
+[TEXT_MAP]
 {self.update_and_get_full_collision_map(location, coords)}
+[/TEXT_MAP]
 
 Screenshot attached.
 
@@ -1043,6 +1130,29 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     messages = copy.deepcopy(self.navigator_message_history)
                     
                 else:
+                    # This is more complicated...We go through everything that's not the most recent tool_result/message and clip out images and
+                    # text_based maps to save tokens.
+                    for message in self.message_history:
+                        maybe_content = message["content"]
+                        if maybe_content is not None:
+                            new_content = []
+                            for entry in maybe_content:
+                                if entry["type"] == "image":
+                                    continue
+                                if entry["type"] == "text":
+                                    text = entry["text"]
+                                    try:
+                                        # Remove everything between [TEXT_MAP] tags
+                                        first, second = text.split("[TEXT_MAP]")
+                                        second, third = second.split("[/TEXT_MAP]")
+                                        entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                    except Exception:
+                                        pass
+                                new_content.append(entry)
+                            message["content"] = new_content
+                        else:
+                            breakpoint()
+                    self.strip_text_map_and_images_from_history(self.message_history)
                     messages = copy.deepcopy(self.message_history)
 
                 if len(messages) >= 3:
@@ -1129,6 +1239,45 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     # For openai we need to add a screenschot too to tool calls or it gets very confused.
                     # Get a fresh screenshot after executing the buttons
                     messages_to_use = self.openai_navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.openai_message_history
+                    
+                    # We go through everything that's not the most recent tool_result/message and clip out images and
+                    # text_based maps to save tokens.
+                    for message in messages_to_use:
+                        maybe_content = message["content"]
+                        if maybe_content is not None:
+                            new_content = []
+                            for entry in maybe_content:
+                                if isinstance(entry, str):
+                                    continue
+                                if entry["type"] == "input_image":
+                                    continue
+                                elif entry["type"] == "input_text":
+                                    text = entry["text"]
+                                    try:
+                                        # Remove everything between [TEXT_MAP] tags
+                                        first, second = text.split("[TEXT_MAP]")
+                                        second, third = second.split("[/TEXT_MAP]")
+                                        entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                    except Exception:
+                                        pass
+                                elif entry["type"] == "tool_result":
+                                    for sub_entry in entry["content"]:
+                                        if sub_entry["type"] == "input_image":
+                                            continue
+                                        if sub_entry["type"] == "input_text":
+                                            text = sub_entry["text"]
+                                            try:
+                                                # Remove everything between [TEXT_MAP] tags
+                                                first, second = text.split("[TEXT_MAP]")
+                                                second, third = second.split("[/TEXT_MAP]")
+                                                entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
+                                            except Exception:
+                                                pass
+                                new_content.append(entry)
+                            message["content"] = new_content
+                        else:
+                            breakpoint()
+                    
                     if isinstance(messages_to_use[-1], dict) and messages_to_use[-1].get('type') == "function_call_output":
                         # Unfortunately this is buried...
                         # parsed_result = json.loads(self.openai_message_history[-1]["output"])
@@ -1155,7 +1304,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                                 },
                             ]
                         if not self.emulator.get_in_combat() and (self.use_full_collision_map or self.detailed_navigator_mode):
-                            content[0]['text'] += "\n\nHere is an ASCII map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)
+                            content[0]['text'] += "\n\nHere is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)
                         if self.emulator.get_in_combat() and self.detailed_navigator_mode:
                             # Only possible if navigator mode has been running.
                             content[0]['text'] += "\n\n "  + "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."
@@ -1360,7 +1509,10 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     location_archive = self.label_archive.get(location)
                     if location_archive:
                         for key, value in location_archive.items():
-                            if "approximate" not in value.lower():
+                            for key2, value2 in value.items():
+                                if "approximate" not in value2.lower():
+                                    del value[key2]
+                            if not value:
                                 del location_archive[key]
                 logger.info(f"Completed step {steps_completed}/{num_steps}")
                 self.text_display.add_message(f"Absolute step count: {self.absolute_step_count}")
@@ -1640,7 +1792,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
         if not self.emulator.get_in_combat():
             collision_map = self.update_and_get_full_collision_map(location, coords)
         else:
-            if location in self.full_collision_map[location]:
+            if location in self.full_collision_map:
                 collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []))
             else:
                 collision_map = "Not yet available"
@@ -1652,7 +1804,7 @@ RAM Information: {memory_info}
 
 Steps Since last Location Shift: {self.steps_since_location_shift}
 
-ASCII MAP: {collision_map}
+text_based MAP: {collision_map}
 
 Last 10 Checkpoints: {last_checkpoints}
 

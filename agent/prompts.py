@@ -8,26 +8,22 @@
 
 FULL_NAVIGATOR_PROMPT = """Your job is to perform navigation through an area of Pokemon Red.
 
-You will be given an ASCII map of the area as well as a screenshot of the current game state.
+You will be given an text_based map of the area as well as a screenshot of the current game state.
 
-Read the ASCII map VERY carefully.
+Read the text_based map VERY carefully.
 
-It is important to understand the grid system used on the map and for the label list:
+It is important to understand the grid system used on the text_based map and for the label list:
 
 1. The top-left corner of the location is at 0, 0
 2. The first number is the column number, increasing horizontally to the right.
 3. The second number is the row number, increasing vertically downward.
 
-Some example reasoning: If the top left of the ASCII map is at (3, 38), then we are at least 38 units away from the top of the map.
+Some example reasoning: If the top left of the text_based map is at (3, 38), then we are at least 38 units away from the top of the map.
 
-#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
-Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
-    2a. If not, instead find a nearby location labeled with a number
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
-4. Navigate via the REVERSE of this path.
+#### SPECIAL TIP FOR text_based MAP #####
+The StepsToReach number is a guide to help you reach places. Viable paths all require going through StepsToReach 1, 2, 3....
+
+When navigating to locations on the map, pay attention to whether a valid path like this exists. You may have to choose a different direction!
 ###########################################
 
 Note that these numbers will shift every time your player character moves.
@@ -36,7 +32,7 @@ PRIORITY: While navigating, it is VERY IMPORTANT to use any exit you see, partic
 PRIORITY: Some exits are at the edge of the map or area! Theese can be detected by looking for a passable tile next to the black out-of-bounds area.
 Sometimes, these will have tile coordinates of either row 0 or column 0. Do not miss these!
 
-Your job is to explore the area thoroughly using a DEPTH FIRST SEARCH approach. Both your ASCII map and screenshot will inform you
+Your job is to explore the area thoroughly using a DEPTH FIRST SEARCH approach. Both your text_based map and screenshot will inform you
 which areas you have already explored. Use these to guide your DEPTH FIRST SEARCH and avoid explored areas. Try to reach areas labeled in u
 if possible, as they are completely uncharted!
 
@@ -52,9 +48,9 @@ In addition talk to any NPCs you see and pick up items on the ground. Remember, 
 
 NAVIGATION_PROMPT = """Your job is to provide navigation advice for another model playing Pokemon Red.
 
-You will be given a navigation goal, an ASCII map of the area, and a list of locations that have been labeled by the model.
+You will be given a navigation goal, an text_based map of the area, and a list of locations that have been labeled by the model.
 
-Read the ASCII map VERY carefully.
+Read the text_based map VERY carefully.
 
 It is important to understand the grid system used on the map and for the label list:
 
@@ -62,12 +58,12 @@ It is important to understand the grid system used on the map and for the label 
 2. The first number is the column number, increasing horizontally to the right.
 3. The second number is the row number, increasing vertically downward.
 
-Some example reasoning: If the top left of the ASCII map is at (3, 38), then we are at least 38 units away from the top of the map. This is
+Some example reasoning: If the top left of the text_based map is at (3, 38), then we are at least 38 units away from the top of the map. This is
 relevant when looking for exits on the north or left of the map.
 
 #### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
 Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
+1. Inspect the text_based map
 2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
     2a. If not, instead find a nearby location labeled with a number
 3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
@@ -100,42 +96,32 @@ Examine the conversation history you have been provided, which is of an error-pr
 
 Your job is to deduce the current state of the game from that conversation, as well as additional data you will be provided:
 1. A screenshot of the game currently
-2. An ASCII collision map of the current location, based on exploration so far.
+2. An text_based collision map of the current location, based on exploration so far.
 3. Information gathered from the RAM state of the game.
 4. A list of checkpoints logged by the agent to track progress.
 5. Labels for map locations assigned by the agent and other code.
 6. A previous summary of the state of the game.
 
-It is important to understand the grid system used on the ASCII map and for the label list:
+It is important to understand the grid system used on the text_based map and for the label list:
 
 1. The top-left corner of the location is at 0, 0
 2. The first number is the column number, increasing horizontally to the right.
 3. The second number is the row number, increasing vertically downward.
 
-Some example reasoning: If the top left of the ASCII map is at (3, 38), then we are at least 38 units away from the top of the map. This is
+Some example reasoning: If the top left of the text_based map is at (3, 38), then we are at least 38 units away from the top of the map. This is
 relevant when looking for exits on the north or left of the map.
 
-The numbers on the map indicate how far away any given tile is from the player character.
-
-#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
-Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
-    2a. If not, instead find a nearby location labeled with a number
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
-4. Navigate via the REVERSE of this path.
-###########################################
+The numbers on the map indicate how far away any given tile is from the player character in terms of actual walking paths (not raw distance).
 
 An important subgoal in every new location is to thoroughly explore the area. In mazes, it is often faster to find the exit by EXPLORING rather than
-trying to go straight for the exit. Make sure to emphasize this when looking at your ASCII map, and include it in your goals in large maps.
+trying to go straight for the exit. Make sure to emphasize this when looking at your text_based map, and include it in your goals in large maps.
 
 Please write down a list of FACTS about the current game state, organized into the following groups, sorted from most reliable to least reliable:
 
 1. Data from RAM (100% accurate. This is provided directly by the developer and is not to be questioned.)
 2. Information from your own knowledge about Pokemon Red (Mostly reliable, dependent on recollection)
 3. Information from the checkpoints (Mostly reliable)
-4. Information from the ASCII map (Mostly reliable, dependent on accuracy reading the map)
+4. Information from the text_based map (Mostly reliable, dependent on accuracy reading the map)
 5. Information from the previous game summary (Somewhat reliable, but outdated)
 6. Labels for map locations assigned by the agent and other code. (Somewhat reliable)
 7. Information from inspecting the screenshot (Not very reliable, due to mistakes in visual identification)
@@ -168,7 +154,7 @@ These will be provided to you in 4 groups, ranging from more to less reliable:
 1. Data from RAM (100% accurate. This is provided directly by the developer and is not to be questioned.)
 2. Information from your own knowledge about Pokemon Red (Mostly reliable, dependent on recollection)
 3. Information from the checkpoints (Mostly reliable)
-4. Information from the ASCII map (Mostly reliable, dependent on accuracy reading the map)
+4. Information from the text_based map (Mostly reliable, dependent on accuracy reading the map)
 5. Information from the previous game summary (Somewhat reliable, but outdated)
 6. Labels for map locations assigned by the agent and other code. (Somewhat reliable)
 7. Information from inspecting the screenshot (Not very reliable, due to mistakes in visual identification)
@@ -223,7 +209,7 @@ One big sign of navigation problems is if the model has been trying to navigate 
 
 TIPS TO PROVIDE FOR NAVIGATION:
 1. If a label is incorrect, STRONGLY ENCOURAGE stopping to edit the label to something else (potentially even " ").
-2. Remind the agent to consult its ASCII map.
+2. Remind the agent to consult its text_based map.
 3. Remember that "navigate_to_offscreen_coordinate" and the "detailed_navigator" tool are there to query for help.
 4. If they seem to be stuck in a location, emphasize the importance of NOT revisiting EXPLORED tiles. It may even be PRIORITY ONE to stop stepping on EXPLORED tiles.
 5. In mazes, it is MORE IMPORTANT to avoid EXPLORED tiles than to go in the correct direction.
@@ -235,7 +221,7 @@ TIPS TO PROVIDE FOR NAVIGATION:
    6a. Doors and stairs are NEVER IMPASSABLE.
    6b. By extension, squares that are EXPLORED are NEVER Doors or stairs.
    6c. IMPASSABLE Squares are never the exit from an area UNLESS they are directly on top of the black void at the edge of the map. There must be a passable (non-red) path INTO the black area for this to work.
-7. Pay attention to the ASCII maps and whether the direction of travel is sensible. They may be pathing into a dead end!
+7. Pay attention to the text_based maps and whether the direction of travel is sensible. They may be pathing into a dead end!
    
 
 OTHER NOTES:
@@ -267,25 +253,19 @@ The screen will be labeled with your overworld coordinates (in black) and other 
 
 Screenshots are taken every time you take an action.
 
-In many overworld locations, you will be provided a detailed ASCII map of locations you have already explored. Please
+In many overworld locations, you will be provided a detailed text_based map of locations you have already explored. Please
 pay attention to this map when navigating to prevent unnecessary confusion.
 
-VERY IMPORTANT: When navigating the ASCII map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead ends and reach new unexplored areas.
+VERY IMPORTANT: When navigating the text_based map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead ends and reach new unexplored areas.
 VERY IMPORTANT: IF you know the coordinates of where you're trying to go, remember that the "navigate_to_offscreen_coordinate" can provide you detailed instructions.
 REMEMBER TO CHECK "Labeled nearby location" for location coordinates.
     NOTE: This may not work on the very first try. Be patient! Try a few times.
 
-#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
-Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
-    2a. If not, instead find a nearby location labeled with a number
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
-4. Navigate via the REVERSE of this path.
-###########################################
+#### SPECIAL TIP FOR text_based MAP #####
+The StepsToReach number is a guide to help you reach places. Viable paths all require going through StepsToReach 1, 2, 3....
 
-NOTE: the numbers show you possible paths to various locations. It is still up to you to choose which way to go.
+When navigating to locations on the map, pay attention to whether a valid path like this exists. You may have to choose a different direction!
+###########################################
 
 The conversation history may occasionally be summarized to save context space. If you see a message labeled "CONVERSATION HISTORY SUMMARY", this contains the key information about your progress so far. Use this information to maintain continuity in your gameplay.
 The percentages in the summary indicate how reliable each statement is.
@@ -345,24 +325,20 @@ SYSTEM_PROMPT = """You are playing Pokemon Red. You can see the game screen and 
 
 Your goal is to play through Pokemon Red and eventually defeat the Elite Four. Make decisions based on what you see on the screen.
 
-Screenshots are taken every time you take an action, and you are provided with an ASCII map based on your exploration to help you navigate.
+Screenshots are taken every time you take an action, and you are provided with a text-based map based on your exploration to help you navigate.
 
-VERY IMPORTANT: When navigating the ASCII map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead ends and reach new unexplored areas.
+VERY IMPORTANT: When navigating the text-based map is MORE TRUSTWORTHY than your vision. Please carefully inspect it to avoid dead ends and reach new unexplored areas.
+VERY IMPORTANT: Think carefully when navigating, and spell out what tiles you're passing through. Check if these tiles are IMPASSABLE before committing to the path.
 VERY IMPORTANT: IF you know the coordinates of where you're trying to go, remember that the "navigate_to_offscreen_coordinate" can provide you detailed instructions.
 REMEMBER TO CHECK "Labeled nearby location" for location coordinates.
     NOTE: This may not work on the very first try. Be patient! Try a few times.
+VERY IMPORTANT: Exploring unvisited tiles is a TOP priority. Make sure to take the time to check unvisited tiles, etc.
 
-#### SPECIAL NAVIGATION INSTRUCTIONS WHEN TRYING TO REACH A LOCATION #####
-Pay attention to the following procedure when trying to reach a specific location (if you know the coordinates).
-1. Inspect the ASCII map
-2. Find where your destination is on the map using the coordinate system (column, row) and see if it is labeled with a number.
-    2a. If not, instead find a nearby location labeled with a number
-3. Trace a path from there back to the player character (PP) following the numbers on the map, in descending order.
-    3a. So if your destination is numbered 20, then 19, 18...descending all the way to 1 and then PP.
-4. Navigate via the REVERSE of this path.
+#### SPECIAL TIP FOR MAP #####
+The StepsToReach number is a guide to help you reach places. Viable paths all require going through StepsToReach 1, 2, 3....
+
+When navigating to locations on the map, pay attention to whether a valid path like this exists. You may have to choose a different direction!
 ###########################################
-
-NOTE: the numbers show you possible paths to various locations. It is still up to you to choose which way to go.
 
 The conversation history may occasionally be summarized to save context space. If you see a message labeled "CONVERSATION HISTORY SUMMARY", this contains the key information about your progress so far. Use this information to maintain continuity in your gameplay.
 The percentages in the summary indicate how reliable each statement is.
@@ -409,7 +385,7 @@ Action to take.
 
 Tool usage instructions (READ CAREFULLY):
 
-detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300. DO NOT USE THIS IN CITIES OR BUILDINGS.
+detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300.
 
 tips for this tool:
 1. Provide the location that you had a map for. For instance, if it was PEWTER CITY, provide PEWTER CITY. This may not be your current RAM location.
@@ -483,7 +459,7 @@ should be impossible or isn't how the game goes.
    7a. Doors and stairs are NEVER IMPASSABLE.
    7b. By extension, squares that are EXPLORED are NEVER Doors or stairs.
    7c. IMPASSABLE Squares are never the exit from an area UNLESS they are directly on top of the black void at the edge of the map. There must be a passable (non-red) path INTO the black area for this to work.
-8. Pay attention to the ASCII maps and whether the direction of travel is sensible. They may be pathing into a dead end!
+8. Pay attention to the text_based maps and whether the direction of travel is sensible. They may be pathing into a dead end!
    
 
 Other Notes:
@@ -560,7 +536,7 @@ If the conversation shows signs of serious difficulty completing a task.
 Append a section of IMPORTANT HINTS to remind yourself of key facts. Examples:
 
 HIGH PRIORITY NOTES:
-1. Remind the model to use the ASCII map as a guide when navigating, and to find unexplored areas if needed.
+1. Remind the model to use the text_based map as a guide when navigating, and to find unexplored areas if needed.
 2. If a label is incorrect, STRONGLY ENCOURAGE stopping to edit the label to something else (potentially even " "). This may even be PRIORITY ONE.
 3. Remember that the "navigation assistance" tool is there to query for help.
 4. If the conversation has assumptions that violate your knowledge of Pokemon RED, state this. For instance if the conversation is focusing on a task that
