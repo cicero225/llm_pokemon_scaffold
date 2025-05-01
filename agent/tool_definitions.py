@@ -3,6 +3,8 @@ import copy
 
 from google.genai import types
 
+from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to_openai_format
+
 AVAILABLE_TOOLS = [
     {
         "name": "press_buttons",
@@ -134,27 +136,10 @@ AVAILABLE_TOOLS.append({
         },
 })"""
 
-
-GOOGLE_TOOLS: list[types.Tool] = []
-for tool_desc in AVAILABLE_TOOLS:
-    x = copy.copy(tool_desc)  # Shallow copy should be fine here
-    x["parameters"] = x["input_schema"]
-    del x["input_schema"]
-    GOOGLE_TOOLS.append(types.Tool(function_declarations=[x]))
+GOOGLE_TOOLS = convert_tool_defs_to_google_format(AVAILABLE_TOOLS)
 
 # WHY ARE THEY ALL DIFFERENT AHHHH
-OPENAI_TOOLS = []
-for tool_desc in AVAILABLE_TOOLS:
-    x = copy.deepcopy(tool_desc)
-    x["parameters"] = x["input_schema"]
-    del x["input_schema"]
-    x["parameters"]["properties"]["explanation_of_action"] = {
-                    "type": "string",
-                    "description": "MANDATORY: A detailed explanation of why you called this tool"
-                }
-    x["parameters"]["required"].append("explanation_of_action")
-    x["type"] = "function"
-    OPENAI_TOOLS.append(x)
+OPENAI_TOOLS = convert_tool_defs_to_openai_format(AVAILABLE_TOOLS)
 
 # Just a copy of everything without the detailed_navigator or mark_checkpoint, so it can't call itself or wipe the exploration log.
 NAVIGATOR_TOOLS = []
@@ -203,23 +188,5 @@ DISTANT_NAVIGATOR_BUTTONS = [
 ]
 
 
-GOOGLE_DISTANT_NAVIGATOR_BUTTONS: list[types.Tool] = []
-for tool_desc in DISTANT_NAVIGATOR_BUTTONS:
-    x = copy.copy(tool_desc)  # Shallow copy should be fine here
-    x["parameters"] = x["input_schema"]
-    del x["input_schema"]
-    GOOGLE_DISTANT_NAVIGATOR_BUTTONS.append(types.Tool(function_declarations=[x]))
-
-# WHY ARE THEY ALL DIFFERENT AHHHH
-OPENAI_DISTANT_NAVIGATOR_BUTTONS = []
-for tool_desc in DISTANT_NAVIGATOR_BUTTONS:
-    x = copy.deepcopy(tool_desc)
-    x["parameters"] = x["input_schema"]
-    del x["input_schema"]
-    x["parameters"]["properties"]["explanation_of_action"] = {
-                    "type": "string",
-                    "description": "MANDATORY: A detailed explanation of why you called this tool"
-                }
-    x["parameters"]["required"].append("explanation_of_action")
-    x["type"] = "function"
-    OPENAI_DISTANT_NAVIGATOR_BUTTONS.append(x)
+GOOGLE_DISTANT_NAVIGATOR_BUTTONS = convert_tool_defs_to_google_format(DISTANT_NAVIGATOR_BUTTONS)
+OPENAI_DISTANT_NAVIGATOR_BUTTONS = convert_tool_defs_to_openai_format(DISTANT_NAVIGATOR_BUTTONS)
