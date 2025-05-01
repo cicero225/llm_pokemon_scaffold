@@ -7,6 +7,8 @@ import numpy as np
 import os
 import pickle
 from PIL import ImageDraw, ImageFilter, Image
+import threading
+import time
 
 from config import MAX_TOKENS, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME, MODEL, MAPPING_MODEL
 from agent.prompts import *
@@ -280,7 +282,18 @@ class TextDisplay:
 
 
 class SimpleAgent:
-    def __init__(self, rom_path, headless=True, sound=False, max_history=35, load_state=None, location_history_length=60, location_archive_file_name: Optional[str]=None, use_full_collision_map: bool=True):
+    def __init__(
+        self, 
+        rom_path, 
+        headless=True, 
+        sound=False, 
+        max_history=60, 
+        load_state=None, 
+        location_history_length=40, 
+        location_archive_file_name: Optional[str]=None, 
+        use_full_collision_map: bool=True,
+        pyboy_main_thread: bool=False
+    ):
         """Initialize the simple agent.
 
         Args:
@@ -290,7 +303,10 @@ class SimpleAgent:
             max_history: Maximum number of messages in history before summarization
         """
         self.emulator = Emulator()
-        self.emulator.initialize(rom_path, headless, sound)  # Initialize the emulator
+        self.pyboy_main_thread = pyboy_main_thread
+        self.emulator_init_kwargs = {"rom_path": rom_path, "headless": headless, "sound": sound, "pyboy_main_thread": self.pyboy_main_thread}
+        if not self.pyboy_main_thread:
+            self.emulator.initialize(**self.emulator_init_kwargs)
         if MODEL == "CLAUDE" or MAPPING_MODEL == "CLAUDE":
             self.anthropic_client = Anthropic(api_key=API_CLAUDE, max_retries=10)
         if MODEL == "GEMINI" or MAPPING_MODEL == "GEMINI":
@@ -330,12 +346,16 @@ class SimpleAgent:
         self.steps_since_location_shift = 0
         self.no_navigate_here = ""
         self.navigation_location = ""
+        self._steps_completed = 0
+        self.load_state = load_state
 
-
-        if load_state:
+        if load_state and not self.pyboy_main_thread:
             logger.info(f"Loading saved state from {load_state}")
             self.emulator.load_state(load_state)
             self.load_location_archive(location_archive_file_name)
+        elif load_state:
+            self.load_location_archive(location_archive_file_name)
+
 
     # This does the overlay for the model.
     def get_screenshot_base64(
@@ -1051,13 +1071,29 @@ Pay attention to the following procedure when trying to reach a specific locatio
             }
 
 
-    def run(self, num_steps=1, save_every=10, save_file_name: Optional[str] = None):
+    def run(self, num_steps=1, save_every=10, save_file_name: Optional[str] = None, _running_in_thread=False):
         """Main agent loop.
 
         Args:
             num_steps: Number of steps to run for
         """
+
+        if self.pyboy_main_thread and not _running_in_thread:
+            thread = threading.Thread(target=self.run, kwargs={"num_steps": num_steps, "save_every": save_every, "save_file_name": save_file_name, "_running_in_thread": True})
+            thread.start()
+
+            self.emulator.initialize(**self.emulator_init_kwargs) 
+
+            return self._steps_completed
+
         logger.info(f"Starting agent loop for {num_steps} steps")
+
+        if self.pyboy_main_thread:
+            self.emulator.wait_for_pyboy()
+
+            if self.load_state:
+                logger.info(f"Loading saved state from {self.load_state}")
+                self.emulator.load_state(self.load_state)
 
         # start emulator loop
         steps_completed = 0
@@ -1514,8 +1550,15 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
             with open("location_milestones.txt", "w") as fw:
                 fw.write(str(self.location_milestones))
 
-        if not self.running:
+        if (
+            not self.running
+            # if the emulator is running in the main thread, we need to stop it
+            # to allow the main thread to exit the emulator loop
+            or self.pyboy_main_thread
+        ):
             self.emulator.stop()
+
+        self._steps_completed = steps_completed
 
         return steps_completed
 
