@@ -512,13 +512,22 @@ class SimpleAgent:
         # TODO: Code for being able to restart gemini/openai with an interrupted tool call. Currently may glitch out in that scenario.
 
     # Save tokens...
-    def strip_text_map_and_images_from_history(self, message_history: list[dict[str, Any]]) -> None:
+    @staticmethod
+    def strip_text_map_and_images_from_history(message_history: list[dict[str, Any]], openai_format: bool=False) -> None:
         # We go through everything that's not the most recent tool_result/message and clip out images and
         # text_based maps to save tokens.
+        image_type_str = "input_image" if openai_format else "image"
+        text_type_str = "input_text" if openai_format else "text"
         for message in message_history:
-            maybe_content = message["content"]
-            if isinstance(maybe_content, str):
+            if openai_format and not isinstance(message, dict) :
                 continue
+            # So obnoxiously, openai handles function outputs totally differently
+            if openai_format and message.get('type') == "function_call_output":
+                maybe_content = json.loads(message['output'])
+            else:
+                maybe_content = message["content"]
+                if isinstance(maybe_content, str):
+                    continue
             if maybe_content is not None:
                 new_content = []
                 for entry in maybe_content:
@@ -526,9 +535,9 @@ class SimpleAgent:
                          # we can just assume it's one of a few special messages  we don't have to do anything with.
                         new_content.append(entry)
                         continue
-                    if entry["type"] == "image":
+                    if entry["type"] == image_type_str:
                         continue
-                    elif entry["type"] == "text":
+                    elif entry["type"] == text_type_str:
                         text = entry["text"]
                         try:
                             # Remove everything between [TEXT_MAP] tags
@@ -540,9 +549,9 @@ class SimpleAgent:
                     elif entry["type"] == "tool_result":
                         sub_content = []
                         for sub_entry in entry["content"]:
-                            if sub_entry["type"] == "image":
+                            if sub_entry["type"] == image_type_str:
                                 continue
-                            elif sub_entry["type"] == "text":
+                            elif sub_entry["type"] == text_type_str:
                                 text = sub_entry["text"]
                                 try:
                                     # Remove everything between [TEXT_MAP] tags
@@ -554,7 +563,10 @@ class SimpleAgent:
                             sub_content.append(sub_entry)
                         entry["content"] = sub_content         
                     new_content.append(entry)
-                message["content"] = new_content
+                if openai_format and message.get('type') == "function_call_output":
+                    message['output'] = json.dumps(new_content)
+                else:
+                    message["content"] = new_content
             else:
                 breakpoint()
 
@@ -1134,34 +1146,6 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     messages = copy.deepcopy(self.navigator_message_history)
                     
                 else:
-                    # This is more complicated...We go through everything that's not the most recent tool_result/message and clip out images and
-                    # text_based maps to save tokens.
-                    for message in self.message_history:
-                        maybe_content = message["content"]
-                        if isinstance(maybe_content, str):
-                            continue
-                        if maybe_content is not None:
-                            new_content = []
-                            for entry in maybe_content:
-                                if isinstance(entry, str):
-                                    # we can just assume it's one of a few special messages  we don't have to do anything with.
-                                    new_content.append(entry)
-                                    continue
-                                if entry["type"] == "image":
-                                    continue
-                                if entry["type"] == "text":
-                                    text = entry["text"]
-                                    try:
-                                        # Remove everything between [TEXT_MAP] tags
-                                        first, second = text.split("[TEXT_MAP]")
-                                        second, third = second.split("[/TEXT_MAP]")
-                                        entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
-                                    except Exception:
-                                        pass
-                                new_content.append(entry)
-                            message["content"] = new_content
-                        else:
-                            breakpoint()
                     self.strip_text_map_and_images_from_history(self.message_history)
                     messages = copy.deepcopy(self.message_history)
 
@@ -1250,47 +1234,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     # Get a fresh screenshot after executing the buttons
                     messages_to_use = self.openai_navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.openai_message_history
                     
-                    # We go through everything that's not the most recent tool_result/message and clip out images and
-                    # text_based maps to save tokens.
-                    for message in messages_to_use:
-                        maybe_content = message["content"]
-                        if isinstance(maybe_content, str):
-                            continue
-                        if maybe_content is not None:
-                            new_content = []
-                            for entry in maybe_content:
-                                if isinstance(entry, str):
-                                     # we can just assume it's one of a few special messages  we don't have to do anything with.
-                                    new_content.append(entry)
-                                    continue
-                                if entry["type"] == "input_image":
-                                    continue
-                                elif entry["type"] == "input_text":
-                                    text = entry["text"]
-                                    try:
-                                        # Remove everything between [TEXT_MAP] tags
-                                        first, second = text.split("[TEXT_MAP]")
-                                        second, third = second.split("[/TEXT_MAP]")
-                                        entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
-                                    except Exception:
-                                        pass
-                                elif entry["type"] == "tool_result":
-                                    for sub_entry in entry["content"]:
-                                        if sub_entry["type"] == "input_image":
-                                            continue
-                                        if sub_entry["type"] == "input_text":
-                                            text = sub_entry["text"]
-                                            try:
-                                                # Remove everything between [TEXT_MAP] tags
-                                                first, second = text.split("[TEXT_MAP]")
-                                                second, third = second.split("[/TEXT_MAP]")
-                                                entry["text"] = first + "TEXT MAP and sceenshot omitted to save redundancy" + third
-                                            except Exception:
-                                                pass
-                                new_content.append(entry)
-                            message["content"] = new_content
-                        else:
-                            breakpoint()
+                    self.strip_text_map_and_images_from_history(messages_to_use, openai_format=True)
                     
                     if isinstance(messages_to_use[-1], dict) and messages_to_use[-1].get('type') == "function_call_output":
                         # Unfortunately this is buried...
@@ -1342,6 +1286,7 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                             break
                         except BadRequestError as e:
                             cur_tries += 1  # Sometimes it spuriously flags this as content violation. I don't know why.
+                            breakpoint()
                             continue
                         except Exception as e:
                             print(e)
@@ -1476,8 +1421,12 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                             if remove:
                                 self.navigator_message_history = self.navigator_message_history[k + 1:]
                         if len(self.openai_navigator_message_history) >= self.max_history: 
-                            # TODO: This may cause orphan tool calls, does this break things?
                             self.openai_navigator_message_history = self.openai_navigator_message_history[self.max_history - len(self.openai_navigator_message_history):]
+                            # Let's scroll in, if we run into a tool_call_output, let's get rid of it since it's an orphaned tool_call.
+                            
+                            if self.openai_navigator_message_history and self.openai_navigator_message_history[0].get('type') == "function_call_output":
+                                self.openai_navigator_message_history = self.openai_navigator_message_history[1:]
+
                     else:
                         if len(self.message_history) >= self.max_history or (MODEL == "OPENAI" and token_usage > 170000):  # To my surprise, o3 runs out fasssst
                             self.agentic_summary()
