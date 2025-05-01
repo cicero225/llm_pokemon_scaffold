@@ -497,10 +497,14 @@ class SimpleAgent:
         # text_based maps to save tokens.
         for message in message_history:
             maybe_content = message["content"]
+            if isinstance(maybe_content, str):
+                continue
             if maybe_content is not None:
                 new_content = []
                 for entry in maybe_content:
                     if isinstance(entry, str):
+                         # we can just assume it's one of a few special messages  we don't have to do anything with.
+                        new_content.append(entry)
                         continue
                     if entry["type"] == "image":
                         continue
@@ -1098,9 +1102,15 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     # text_based maps to save tokens.
                     for message in self.message_history:
                         maybe_content = message["content"]
+                        if isinstance(maybe_content, str):
+                            continue
                         if maybe_content is not None:
                             new_content = []
                             for entry in maybe_content:
+                                if isinstance(entry, str):
+                                    # we can just assume it's one of a few special messages  we don't have to do anything with.
+                                    new_content.append(entry)
+                                    continue
                                 if entry["type"] == "image":
                                     continue
                                 if entry["type"] == "text":
@@ -1208,10 +1218,14 @@ By the way, if you ever reach {self.no_navigate_here}, please turn around and re
                     # text_based maps to save tokens.
                     for message in messages_to_use:
                         maybe_content = message["content"]
+                        if isinstance(maybe_content, str):
+                            continue
                         if maybe_content is not None:
                             new_content = []
                             for entry in maybe_content:
                                 if isinstance(entry, str):
+                                     # we can just assume it's one of a few special messages  we don't have to do anything with.
+                                    new_content.append(entry)
                                     continue
                                 if entry["type"] == "input_image":
                                     continue
