@@ -518,7 +518,7 @@ class SimpleAgent:
         # text_based maps to save tokens.
         image_type_str = "input_image" if openai_format else "image"
         text_type_str = "input_text" if openai_format else "text"
-        for message in message_history:
+        for message in message_history[:-2]:
             if openai_format and not isinstance(message, dict) :
                 continue
             # So obnoxiously, openai handles function outputs totally differently
