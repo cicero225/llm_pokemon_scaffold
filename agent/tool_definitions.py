@@ -6,6 +6,9 @@ from google.genai import types
 from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to_openai_format
 
 AVAILABLE_TOOLS = [
+]
+
+"""
     {
         "name": "press_buttons",
         "description": "Press a sequence of buttons on the Game Boy.",
@@ -27,10 +30,36 @@ AVAILABLE_TOOLS = [
             },
             "required": ["buttons"],
         },
-    }
-]
+    }"""
 
 AVAILABLE_TOOLS.append({
+    "name": "use_subagent",
+    "description": "Call another LLM to handle a minor task quickly",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "detailed_instructions": {
+                "type": "string",
+                "description": "Detailed instructions to give the other LLM about what its task is"
+            },
+            "additional_detailed_instructions": {
+                "type": "string",
+                "description": "Further instructions to give the other LLM about what its task is"
+            },
+            "return_instructions": {
+                "type": "string",
+                "description": "Instruction on what information the other LLM should tell you when it's done."
+            },
+            "needs_text_map": {
+                "type": "boolean",
+                "description": "Whether this agent needs a copy of the text map to do its work."
+            }
+        },
+        "required": ["detailed_instructions", "additional_detailed_instructions", "return_instructions", "needs_text_map"],
+    },
+})
+
+"""AVAILABLE_TOOLS.append({
     "name": "navigate_to",
     "description": "Automatically navigate to a position on screen. The available locations are included in your screenshot. This tool is only available in the overworld.",
     "input_schema": {
@@ -47,11 +76,11 @@ AVAILABLE_TOOLS.append({
         },
         "required": ["row", "col"],
     },
-})
+})"""
 
 AVAILABLE_TOOLS.append({
-    "name": "navigate_to_offscreen_coordinate",
-    "description": "Will try to take you to a specific coordinate offscreen",
+    "name": "navigate_to_coordinate",
+    "description": "Will try to take you to a specific in your text map or on the screenshot",
     "input_schema": {
         "type": "object",
         "properties": {

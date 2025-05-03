@@ -639,8 +639,12 @@ class Emulator:
     def get_in_combat(self) -> bool:
         reader = PokemonRedReader(self.pyboy.memory)
         return reader.read_in_combat()
+    
+    def get_warps(self) -> list[tuple[int, int]]:
+        reader = PokemonRedReader(self.pyboy.memory)
+        return reader.get_warps()
 
-    def get_state_from_memory(self) -> tuple[str, str, tuple[int, int]]:
+    def get_state_from_memory(self, get_nearby_warps: bool=True) -> tuple[str, str, tuple[int, int]]:
         """
         Reads the game state from memory and returns a string representation of it.
         """
@@ -667,6 +671,13 @@ class Emulator:
         memory_str += f"RAM Location: {location}\n"
         memory_str += f"Coordinates (Horizontal Position/column left-to-right, Vertical Position/row top-to-bottom): {coords}\n"
         memory_str += f"Valid Moves: {valid_moves_str}\n"
+        if get_nearby_warps:
+            all_warps = reader.get_warps()
+            nearby_warps = []
+            for entry in all_warps:
+                if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
+                    nearby_warps.append(entry)
+            memory_str += f"Nearby Warps (Doors, stairs, etc.): {nearby_warps}\n"
         memory_str += f"Badges: {', '.join(reader.read_badges())}\n"
 
         # Inventory

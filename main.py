@@ -42,7 +42,7 @@ def main():
     parser.add_argument(
         "--max-history", 
         type=int, 
-        default=60, 
+        default=50, 
         help="Maximum number of messages in history before summarization"
     )
     parser.add_argument(
