@@ -643,6 +643,10 @@ class Emulator:
     def get_warps(self) -> list[tuple[int, int]]:
         reader = PokemonRedReader(self.pyboy.memory)
         return reader.get_warps()
+    
+    def get_direction(self) -> str:
+        full_map = self.pyboy.game_wrapper.game_area()
+        return self._get_direction(full_map)
 
     def get_state_from_memory(self, get_nearby_warps: bool=True) -> tuple[str, str, tuple[int, int]]:
         """
@@ -665,7 +669,11 @@ class Emulator:
         location = reader.read_location()
         coords = reader.read_coordinates()  # This comes out col, row
 
+        full_map = self.pyboy.game_wrapper.game_area()
+        direction = self._get_direction(full_map)
+
         memory_str += f"Player: {name}\n"
+        memory_str += f"Character is currently facing: {direction}\n"
         memory_str += f"Rival: {rival_name}\n"
         memory_str += f"Money: ${reader.read_money()}\n"
         memory_str += f"RAM Location: {location}\n"

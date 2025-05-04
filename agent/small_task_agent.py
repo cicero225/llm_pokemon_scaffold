@@ -86,7 +86,7 @@ SMALL_TASK_TOOL_DEFINITIONS = [
     }
 ]
 
-MAX_SUBAGENT_STEPS = 50
+MAX_SUBAGENT_STEPS = 30
 
 class SmallTaskAgent:
     def __init__(self, instructions: str, senior_agent: "SimpleAgent", include_text_map: bool, task_id: str):
@@ -113,8 +113,11 @@ class SmallTaskAgent:
     def step(self) -> tuple[bool, Optional[tuple[bool, str]]]:
         """returns should continue subtool, tool finish status, explanation"""
         self.senior_agent.strip_text_map_and_images_from_history(self.history, MINI_MODEL == "OPENAI")
-        if len(self.history) > MAX_SUBAGENT_STEPS:
-            return False, (False, f"Sub agent timed out (Took more than {MAX_SUBAGENT_STEPS} without success)")
+        if len(self.history) > MAX_SUBAGENT_STEPS - 1:
+            self.history.append({
+                "role": "user",
+                "content": "This is a direct order from the developer: You are being timed out. Please report whatever you can and call task_abort."
+            })
         malformed = False
         if MINI_MODEL == "CLAUDE":
             response = self.senior_agent.anthropic_client.messages.create(

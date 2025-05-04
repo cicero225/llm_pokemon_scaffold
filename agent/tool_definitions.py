@@ -8,8 +8,8 @@ from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to
 AVAILABLE_TOOLS = [
 ]
 
-"""
-    {
+
+PRESS_BUTTON_SCHEMA = {
         "name": "press_buttons",
         "description": "Press a sequence of buttons on the Game Boy.",
         "input_schema": {
@@ -30,7 +30,7 @@ AVAILABLE_TOOLS = [
             },
             "required": ["buttons"],
         },
-    }"""
+    }
 
 AVAILABLE_TOOLS.append({
     "name": "use_subagent",
@@ -172,22 +172,14 @@ OPENAI_TOOLS = convert_tool_defs_to_openai_format(AVAILABLE_TOOLS)
 
 # Just a copy of everything without the detailed_navigator or mark_checkpoint, so it can't call itself or wipe the exploration log.
 NAVIGATOR_TOOLS = []
-for entry in AVAILABLE_TOOLS:
-    if entry["name"] in ["detailed_navigator", "mark_checkpoint"]:
+for entry in AVAILABLE_TOOLS + [PRESS_BUTTON_SCHEMA]:
+    if entry["name"] in ["detailed_navigator", "mark_checkpoint", "use_subagent"]:
         continue
     NAVIGATOR_TOOLS.append(entry)
 
-GOOGLE_NAVIGATOR_TOOLS = []
-for entry in GOOGLE_TOOLS:
-    if entry.function_declarations[0].name in ["detailed_navigator", "mark_checkpoint"]:
-        continue
-    GOOGLE_NAVIGATOR_TOOLS.append(entry)
+GOOGLE_NAVIGATOR_TOOLS = convert_tool_defs_to_google_format(NAVIGATOR_TOOLS)
 
-OPENAI_NAVIGATOR_TOOLS = []
-for entry in OPENAI_TOOLS:
-    if entry["name"] in ["detailed_navigator", "mark_checkpoint"]:
-        continue
-    OPENAI_NAVIGATOR_TOOLS.append(entry)
+OPENAI_NAVIGATOR_TOOLS = convert_tool_defs_to_openai_format(NAVIGATOR_TOOLS)
 
 
 

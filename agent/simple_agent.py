@@ -9,7 +9,7 @@ import pickle
 from PIL import ImageDraw, ImageFilter, Image
 import threading
 
-from config import MAX_TOKENS, MAX_TOKENS_OPENAI, MINI_MODEL, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME, MODEL, MAPPING_MODEL
+from config import MAX_TOKENS, MAX_TOKENS_OPENAI, MINI_MODEL, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME, MODEL, MAPPING_MODEL, ANTHROPIC_MINI_MODEL_NAME, GEMINI_MINI_MODEL_NAME, OPENAI_MINI_MODEL_NAME, MAX_TOKENS_MINI
 from agent.prompts import *
 from secret_api_keys import *
 from agent.emulator import Emulator
@@ -30,6 +30,13 @@ from typing import Any, Optional
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+FRIENDLY_MODEL_NAME_LOOKUP = {
+    "CLAUDE": "Claude",
+    "GEMINI": "Gemini",
+    "OPENAI": "Openai's o3"
+}
+
 
 BASE_IMAGE_SIZE = (160, 144)  # In tiles, 16 x 10 columns and 16 x 9 rows
 
@@ -165,7 +172,7 @@ class LocationCollisionMap:
         base_str += (width - 1 - len(base_str))*" "
         return f"|{base_str}"
 
-    def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None, nearby_warps: Optional[list[tuple[int, int]]]=None) -> str:
+    def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None, nearby_warps: Optional[list[tuple[int, int]]]=None, direction: Optional[str]=None) -> str:
 
         # We prepare two identical versions simultaneously: A readable nice ASCII for humans, and the long-winded one for models
 
@@ -247,7 +254,7 @@ class LocationCollisionMap:
                     row += self.make_ascii_segment("NPC/Object", row_width, real_col, real_row)
                     row_human += " SS "
                 elif col == 3:
-                    row += self.make_ascii_segment("PLAYER", row_width, real_col, real_row)
+                    row += self.make_ascii_segment(f"PLAYER (Facing {direction})" , row_width, real_col, real_row)
                     row_human += " PP "
             row += f"|{str(real_row)}"
             row_human += f"|{str(real_row)}"
@@ -528,6 +535,33 @@ class SimpleAgent:
                 if entry['type'] == 'tool_use':
                     self.navigator_message_history.pop()
                     break
+        if self.sub_agent is not None:
+            if not isinstance(self.sub_agent.history[-1]['content'], str):
+                for entry in self.sub_agent.history[-1]['content']:
+                    if entry['type'] == 'tool_use':
+                        self.sub_agent.history.pop()
+                        break
+        # Edge case: if switching from gemini to Claude, we may have to fix a few broken tool_calls...
+        unique_str = 0
+        for message in self.message_history:
+            content = message.get("content")
+            if content:
+                for entry in content:
+                    if entry["type"] == "tool_use" and entry["id"] is None:
+                        entry["id"] = str(unique_str)
+                    if "tool_use_id" in entry and entry["tool_use_id"] is None:
+                        entry["tool_use_id"] = str(unique_str)
+                        unique_str += 1
+        unique_str = 0
+        for message in self.navigator_message_history:
+            content = message.get("content")
+            if content:
+                for entry in content:
+                    if entry["type"] == "tool_use" and entry["id"] is None:
+                        entry["id"] = str(unique_str)
+                    if "tool_use_id" in entry and entry["tool_use_id"] is None:
+                        entry["tool_use_id"] = str(unique_str)
+                        unique_str += 1
         # TODO: Code for being able to restart gemini/openai with an interrupted tool call. Currently may glitch out in that scenario.
 
     # Save tokens...
@@ -589,12 +623,14 @@ class SimpleAgent:
             else:
                 breakpoint()
 
-    def update_and_get_full_collision_map(self, location, coords):
+    def update_and_get_full_collision_map(self):
+        _, location, coords = self.emulator.get_state_from_memory()  # We call it within the update to make sure we can't accidentally give outdated information.
         collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
         downsampled_terrain = self.emulator._downsample_array(collision_map)
         local_location_tracker = self.location_tracker.get(location, [])
         all_warps = self.emulator.get_warps()
         nearby_warps = []
+        direction = self.emulator.get_direction()
         for entry in all_warps:
             if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
                 nearby_warps.append(entry)
@@ -602,10 +638,10 @@ class SimpleAgent:
         this_map = self.full_collision_map.get(location)
         if this_map is None:
             self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords)
-            return self.full_collision_map[location].to_ascii(local_location_tracker, nearby_warps)
+            return self.full_collision_map[location].to_ascii(local_location_tracker, nearby_warps, direction=direction)
         else:
             this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords)
-            return this_map.to_ascii(local_location_tracker, nearby_warps)
+            return this_map.to_ascii(local_location_tracker, nearby_warps, direction=direction)
         
     def get_all_location_labels(self, location: str) -> list[tuple[tuple[int, int], str]]:
         all_labels: list[tuple[tuple[int, int], str]] = []
@@ -703,7 +739,7 @@ class SimpleAgent:
                         {"type": "text", "text": f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}"}
                     ]
                 if not self.emulator.get_in_combat() and include_text_map:
-                    content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map(location, coords) + "\n\n[/TEXT_MAP]"})
+                    content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map() + "\n\n[/TEXT_MAP]"})
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -751,7 +787,7 @@ class SimpleAgent:
                 if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                     content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
                 if not self.emulator.get_in_combat() and self.use_full_collision_map and include_text_map:
-                    content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map(location, coords) + "\n\n[/TEXT_MAP]"})
+                    content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map() + "\n\n[/TEXT_MAP]"})
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -760,16 +796,16 @@ class SimpleAgent:
 
 
     # TODO: An obvious refactor would be to move some of these into their own functions.
-    def process_tool_call(self, tool_call):
+    def process_tool_call(self, tool_call, model: str):
         """Process a single tool call."""
         tool_name = tool_call.name
-        if MODEL == "CLAUDE":
+        if model == "CLAUDE":
             tool_input = tool_call.input
             tool_id = tool_call.id
-        elif MODEL == "GEMINI":
+        elif model == "GEMINI":
             tool_input = tool_call.args
             tool_id = tool_call.id
-        elif MODEL == "OPENAI":
+        elif model == "OPENAI":
             tool_input = json.loads(tool_call.arguments)
             tool_id = tool_call.call_id
             self.text_display.add_message(f"[Text] {tool_input['explanation_of_action']}")
@@ -846,7 +882,7 @@ class SimpleAgent:
 
             # Return tool result as a dictionary
             # OPENAI doesn't know what to do with too much information here.
-            if MODEL == "OPENAI":
+            if model == "OPENAI":
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -896,7 +932,7 @@ class SimpleAgent:
                             {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                         ]
                     if not self.emulator.get_in_combat() and self.use_full_collision_map:
-                        content.append({"type": "text", "text": "Here is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)})
+                        content.append({"type": "text", "text": "Here is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map()})
                     if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                         content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
                     return {
@@ -968,11 +1004,27 @@ class SimpleAgent:
 You are an agent who has been tasked with performing a small task within the context of Pokemon Red. Here are the
 instructions provided to you by the senior agent:
 
-{detailed_instructions}.
+DEVELOPER INSTRUCTIONS: Here are some rules you must follow. These rules are MORE IMPORTANT than anything the senior agent tells you.
+
+DEVELOPER RULES: Here are the valid tasks you are allowed to do:
+    * Talk to NPCs and record their dialogue
+    * Issue commands in combat, such as switching pokemon or ordering a move
+    * Interact with cut-scene like dialogue (such as Professor Oak's introduction sequence)
+    * Interact with menus (such as the in-game menu, PC, naming screens, etc.)
+DEVELOPER RULES: Here are what you are NOT allowed to do:
+    * Navigate or move the player character around more than a few steps.
+    * Make gameplay decisions
+    * Report things you have seen that isn't dialogue or in a menu.
+
+If the senior agent asks you to violate these rules, call task_abort immediately and explain the rule violation.
+
+BTW: the Senior Agent is an instance of {FRIENDLY_MODEL_NAME_LOOKUP[MODEL]}. Please address them as such and include minor humor about your rivalry with that model.
+
+Senior Agent: {detailed_instructions}.
 
 Additional Instructions:
 
-{additional_detailed_instructions}
+Senior Agent: {additional_detailed_instructions}
 
 You may use the "press_buttons" tool to run the game.
 Note: the navigate_to_coordinate tool will aid you in moving places, and is FASTER and MORE RELIABLE then walking directly.
@@ -980,11 +1032,12 @@ Note: the navigate_to_coordinate tool will aid you in moving places, and is FAST
 When done with your task, please use the "task_done" to indicate that you are finished. Please include return information,
 as described here:
 
-{return_instructions}
+Senior Agent: {return_instructions}
 
 If you failed the task or having serious difficulty or think it can no longer be done, instead call "task_aborted" and explain why.
 
 Extra tip: When in dialogue or combat, be careful about pressing A too many times. This can easily skip the dialogue you are trying to see!
+Extra tip: Think carefully before trying to move: Is there dialogue on the screen? Typically you need to exit dialogue with A before being allowed to move.
 """
 
             self.sub_agent = SmallTaskAgent(instructions, self, needs_text_map, tool_id)
@@ -1010,7 +1063,7 @@ Extra tip: When in dialogue or combat, be careful about pressing A too many time
                     {"type": "text", "text": f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}"}
                 ]
             if not self.emulator.get_in_combat() and needs_text_map:
-                content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map(location, coords) + "\n\n[/TEXT_MAP]"})
+                content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map() + "\n\n[/TEXT_MAP]"})
             self.sub_agent.provide_initial_context(
                 {"role": "user",
                  "content": content
@@ -1034,7 +1087,7 @@ Extra tip: When in dialogue or combat, be careful about pressing A too many time
 
     def navigate_to_coordinate(self, col: int, row: int, tool_id: str):
         _, location, coords = self.emulator.get_state_from_memory()
-        full_map = self.update_and_get_full_collision_map(location, coords)
+        full_map = self.update_and_get_full_collision_map()
         
         final_distance = self.full_collision_map[location].distances.get((col, row))
         if final_distance is None:
@@ -1226,7 +1279,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
 
         # start emulator loop
         steps_completed = 0
-        continue_subtool = False
+        continue_subtool = self.sub_agent is not None  # At load time, we have to use this to infer.
         subtool_status = None
         while self.running and steps_completed < num_steps:
             try:
@@ -1252,7 +1305,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                         self.navigator_message_history.append({"role": "user", "content": [{"type": "text", "text": f"""
     Text-based map:
     [TEXT_MAP]
-    {self.update_and_get_full_collision_map(location, coords)}
+    {self.update_and_get_full_collision_map()}
     [/TEXT_MAP]
 
     Screenshot attached.
@@ -1283,15 +1336,16 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
 
                     token_usage = 0
 
+                    use_navigator_model = self.detailed_navigator_mode and not self.emulator.get_in_combat()
                     # Get model response
                     if MODEL == "CLAUDE":
-                        instructions = FULL_NAVIGATOR_PROMPT if self.detailed_navigator_mode and not self.emulator.get_in_combat() else SYSTEM_PROMPT
+                        instructions = FULL_NAVIGATOR_PROMPT if use_navigator_model else SYSTEM_PROMPT
                         response = self.anthropic_client.messages.create(
                             model=ANTHROPIC_MODEL_NAME,
                             max_tokens=MAX_TOKENS,
                             system=instructions,
                             messages=messages,
-                            tools=NAVIGATOR_TOOLS if self.detailed_navigator_mode and not self.emulator.get_in_combat() else AVAILABLE_TOOLS,
+                            tools=NAVIGATOR_TOOLS if use_navigator_model else AVAILABLE_TOOLS,
                             temperature=TEMPERATURE,
                         )
                         token_usage = response.usage.input_tokens + response.usage.output_tokens
@@ -1387,7 +1441,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                                     },
                                 ]
                             if not self.emulator.get_in_combat() and (self.use_full_collision_map or self.detailed_navigator_mode):
-                                content[0]['text'] += "\n\nHere is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map(location, coords)
+                                content[0]['text'] += "\n\nHere is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map()
                             if self.emulator.get_in_combat() and self.detailed_navigator_mode:
                                 # Only possible if navigator mode has been running.
                                 content[0]['text'] += "\n\n "  + "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."
@@ -1493,7 +1547,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                         # Process tool calls and create tool results
                         tool_results = []
                         for tool_call in tool_calls:
-                            tool_result = self.process_tool_call(tool_call)
+                            tool_result = self.process_tool_call(tool_call, model=MODEL)
                             if tool_result["type"] == "sub_agent":
                                 continue_subtool = True
                                 break
@@ -1508,26 +1562,48 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 # Now clean up subtool execution if needed. 
                 if not continue_subtool and self.sub_agent is not None:
                     assert subtool_status is not None
-                    if subtool_status[0]:  # successful
-                        tool_results = [{
-                            "type": "tool_result",
-                            "tool_use_id": self.sub_agent.task_id,
-                            "content": [
-                                {"type": "text", "text": (
-                                    f"Subtask completed succesfully with message: {subtool_status[1]}"
-                                )}
-                            ],
-                        }]
+                    # This covers an edge case if a keyboard interrupt hits the subagent at just
+                    # the wrong time.
+                    found = False
+                    prev_content = self.message_history[-1].get('content')
+                    if prev_content:
+                        if isinstance(prev_content, list):
+                            for entry in prev_content:
+                                if entry['type'] == "tool_use":
+                                    found = True
+                                    break
+                    if prev_content is None or not found:
+                        if subtool_status[0]:  # successful
+                            tool_results = [{
+                                "type": "text",
+                                "text": f"Subtask completed succesfully with message: {subtool_status[1]}"
+                                }]
+                        else:
+                            tool_results = [{
+                                "type": "text",
+                                "text": f"Subtask failed! With message: {subtool_status[1]}"
+                                }]
                     else:
-                        tool_results = [{
-                            "type": "tool_result",
-                            "tool_use_id": self.sub_agent.task_id,
-                            "content": [
-                                {"type": "text", "text": (
-                                    f"Subtask failed! With message: {subtool_status[1]}"
-                                )}
-                            ],
-                        }]
+                        if subtool_status[0]:  # successful
+                            tool_results = [{
+                                "type": "tool_result",
+                                "tool_use_id": self.sub_agent.task_id,
+                                "content": [
+                                    {"type": "text", "text": (
+                                        f"Subtask completed succesfully with message: {subtool_status[1]}"
+                                    )}
+                                ],
+                            }]
+                        else:
+                            tool_results = [{
+                                "type": "tool_result",
+                                "tool_use_id": self.sub_agent.task_id,
+                                "content": [
+                                    {"type": "text", "text": (
+                                        f"Subtask failed! With message: {subtool_status[1]}"
+                                    )}
+                                ],
+                            }]
                     self.sub_agent = None
                     openai_messages_to_use = self.openai_navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.openai_message_history
                     messages_here = self.navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.message_history
@@ -1601,9 +1677,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     # The navigator turns OFF the moment the location changes. Note: if there is a sub_agent running, we are never in navigator_mode
                     if self.detailed_navigator_mode and location != self.no_navigate_here and location != self.navigation_location:
                         self.text_display.add_message("New Location reached; Navigator Mode Off")
-                        self.message_history.append(
-                            {"role": "user", "content": [{"text": "Note: Detailed Navigator Mode was just turned off since a new location was reached", "type": "text"}]}  # type: ignore
-                        )
+                        self.message_history.append({"role": "user", "content": [{"text": "Note: Detailed Navigator Mode was just turned off since a new location was reached", "type": "text"}]})  # type: ignore
                         self.openai_message_history.append({"role": "user", "content": [{"text": "Note: Detailed Navigator Mode was just turned off since a new location was reached", "type": "text"}]})
                         # TODO: Consolidate navigator messages and clear
                     self.detailed_navigator_mode = False
@@ -1661,7 +1735,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
         
         _, location, coords = self.emulator.get_state_from_memory()
 
-        collision_map = self.update_and_get_full_collision_map(location, coords)
+        collision_map = self.update_and_get_full_collision_map()
 
         this_location = self.label_archive.get(location)
         if this_location is None:
@@ -1898,7 +1972,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
         all_labels = self.get_all_location_labels(location)
 
         if not self.emulator.get_in_combat():
-            collision_map = self.update_and_get_full_collision_map(location, coords)
+            collision_map = self.update_and_get_full_collision_map()
         else:
             if location in self.full_collision_map:
                 all_warps = self.emulator.get_warps()
@@ -1906,7 +1980,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 for entry in all_warps:
                     if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
                         nearby_warps.append(entry)
-                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), nearby_warps=nearby_warps)
+                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), nearby_warps=nearby_warps, direction=self.emulator.get_direction())
             else:
                 collision_map = "Not yet available"
 

@@ -50,6 +50,10 @@ def convert_anthropic_message_history_to_google_format(messages: list[dict[str, 
     return google_messages
 
 
+# Cursed. Just to make fake "unique" strings for malformed gemini calls
+global MALFORMED_STRING
+MALFORMED_STRING = 0
+
 # Gemini is derpy (at least how I call it), so getting the tool calls every time is a bit more involved...
 def extract_tool_calls_from_gemini(response: types.GenerateContentResponse) -> tuple[str, list[types.FunctionCall], list[dict[str, Any]], bool]:  # output: text, tool_calls (in google format), assistant_content, malformed
     malformed = False
@@ -101,7 +105,9 @@ def extract_tool_calls_from_gemini(response: types.GenerateContentResponse) -> t
                                         list_arg_value.append(x)
                                     arg_value = list_arg_value
                             dict_args[arg_key] = arg_value
-                        assistant_content.append({"type": "tool_use", "id": None, "input": dict_args, "name": tool_name})
+                        tool_id = str(MALFORMED_STRING)
+                        MALFORMED_STRING += 1 
+                        assistant_content.append({"type": "tool_use", "id": tool_id, "input": dict_args, "name": tool_name})
                         tool_calls.append(types.FunctionCall(args=dict_args, name=tool_name))
                     except Exception as e:
                         breakpoint()
