@@ -26,3 +26,9 @@ MAX_TOKENS_OPENAI = 50000
 # so it doesn't prove much. (plus I'd have to do streaming which is just annoying)
 # This basically saves money at the cost of being a bit unsatisfying. This is a lot faster though.
 DIRECT_NAVIGATION = True
+
+
+# How much button history to keep (for the main agent). Used to rebuke for too much use of "a" or the direction arrows (as that can be handled by tools)
+MAX_BUTTON_HISTORY = 50
+MAX_A_PRESS = 5
+MAX_DIRECTION_PRESS = 5

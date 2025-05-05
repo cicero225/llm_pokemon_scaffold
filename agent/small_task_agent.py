@@ -5,6 +5,7 @@ import json
 from agent.emulator import Emulator
 from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to_openai_format, convert_anthropic_message_history_to_google_format, extract_tool_calls_from_gemini
 from config import MINI_MODEL, ANTHROPIC_MINI_MODEL_NAME, GEMINI_MINI_MODEL_NAME, OPENAI_MINI_MODEL_NAME, MAX_TOKENS_MINI, TEMPERATURE, MAX_TOKENS_OPENAI
+from agent.tool_definitions import PRESS_BUTTON_SCHEMA, TALK_TO_NPC_SCHEMA, NAVIGATE_TO_COORDINATE_SCHEMA
 
 from google.genai import types
 from google.genai.errors import ServerError
@@ -16,46 +17,9 @@ from typing import Any, Optional
 
 # Maybe it's own file if it gets too big, but for now I like just having this here.
 SMALL_TASK_TOOL_DEFINITIONS = [
-    {
-        "name": "press_buttons",
-        "description": "Press a sequence of buttons on the Game Boy.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "buttons": {
-                    "type": "array",
-                    "items": {
-                        "type": "string",
-                        "enum": ["a", "b", "start", "select", "up", "down", "left", "right"]
-                    },
-                    "description": "List of buttons to press in sequence. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'"
-                },
-                "wait": {
-                    "type": "boolean",
-                    "description": "Whether to wait for a brief period after pressing each button. Defaults to true."
-                }
-            },
-            "required": ["buttons"],
-        },
-    },
-    {
-        "name": "navigate_to_coordinate",
-        "description": "Will try to take you to a specific in your text map or on the screenshot",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "row": {
-                    "type": "integer",
-                    "description": "The row coordinate to navigate."
-                },
-                "col": {
-                    "type": "integer",
-                    "description": "The column coordinate to navigate."
-                }
-            },
-            "required": ["row", "col"],
-        },
-    },
+    PRESS_BUTTON_SCHEMA,
+    TALK_TO_NPC_SCHEMA,
+    NAVIGATE_TO_COORDINATE_SCHEMA,
     {
         "name": "task_done",
         "description": "Call this when you have finished your task",
@@ -86,7 +50,7 @@ SMALL_TASK_TOOL_DEFINITIONS = [
     }
 ]
 
-MAX_SUBAGENT_STEPS = 30
+MAX_SUBAGENT_STEPS = 50
 
 class SmallTaskAgent:
     def __init__(self, instructions: str, senior_agent: "SimpleAgent", include_text_map: bool, task_id: str):
@@ -330,7 +294,11 @@ class SmallTaskAgent:
         elif tool_name == "navigate_to_coordinate":
             row = tool_input["row"]
             col = tool_input["col"]
-            return self.senior_agent.navigate_to_coordinate(col, row, tool_id)
+            return self.senior_agent.navigate_to_coordinate(col, row, tool_id, True)
+        elif tool_name == "talk_to_npc":
+            row = tool_input["row"]
+            col = tool_input["col"]
+            return self.senior_agent.talk_to_npc(col, row, tool_id, True)
         else:
             breakpoint()
             return False, f"Unknown function call: {tool_name}"

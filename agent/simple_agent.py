@@ -9,7 +9,7 @@ import pickle
 from PIL import ImageDraw, ImageFilter, Image
 import threading
 
-from config import MAX_TOKENS, MAX_TOKENS_OPENAI, MINI_MODEL, ANTHROPIC_MODEL_NAME, TEMPERATURE, DIRECT_NAVIGATION, GEMINI_MODEL_NAME, OPENAI_MODEL_NAME, MODEL, MAPPING_MODEL, ANTHROPIC_MINI_MODEL_NAME, GEMINI_MINI_MODEL_NAME, OPENAI_MINI_MODEL_NAME, MAX_TOKENS_MINI
+from config import *
 from agent.prompts import *
 from secret_api_keys import *
 from agent.emulator import Emulator
@@ -359,6 +359,7 @@ class SimpleAgent:
         self._steps_completed = 0
         self.load_state = load_state
         self.sub_agent: Optional[SmallTaskAgent] = None
+        self.button_history = []
 
         if load_state and not self.pyboy_main_thread:
             logger.info(f"Loading saved state from {load_state}")
@@ -491,6 +492,9 @@ class SimpleAgent:
                 self.sub_agent.senior_agent = None
                 pickle.dump(self.sub_agent, fw)
                 self.sub_agent.senior_agent = self
+            else:
+                pickle.dump(self.sub_agent, fw)  # We still need to dump it for consistency in variable list.
+            pickle.dump(self.button_history, fw)
     def load_location_archive(self, pkl_path: str) -> None:
         try:
             with open(pkl_path, 'rb') as fr:
@@ -521,6 +525,7 @@ class SimpleAgent:
                     self.sub_agent = pickle.load(fr)
                     if self.sub_agent is not None:
                         self.sub_agent.senior_agent = self
+                    self.button_history = pickle.load(fr)
                 except Exception:
                     pass
         except FileNotFoundError:
@@ -545,6 +550,8 @@ class SimpleAgent:
         unique_str = 0
         for message in self.message_history:
             content = message.get("content")
+            if isinstance(content, str):
+                continue
             if content:
                 for entry in content:
                     if entry["type"] == "tool_use" and entry["id"] is None:
@@ -555,6 +562,8 @@ class SimpleAgent:
         unique_str = 0
         for message in self.navigator_message_history:
             content = message.get("content")
+            if isinstance(content, str):
+                continue
             if content:
                 for entry in content:
                     if entry["type"] == "tool_use" and entry["id"] is None:
@@ -667,6 +676,27 @@ class SimpleAgent:
     def press_buttons(self, buttons: list[str], wait: bool, tool_id: str, include_text_map: bool=True, is_subtool: bool=False) -> dict[str, Any]:
         self.text_display.add_message(f"[Buttons] Pressing: {buttons} (wait={wait})")
         
+
+        button_repetition_warning = ""
+        if not is_subtool:
+            self.button_history.extend(buttons)
+            if len(self.button_history) > MAX_BUTTON_HISTORY:
+                self.button_history = self.button_history[MAX_BUTTON_HISTORY - len(self.button_history):]
+            a_count = 0
+            for button in reversed(self.button_history):
+                if button != "a":
+                    break
+                a_count += 1
+                if a_count > MAX_A_PRESS:
+                    button_repetition_warning = f"\nWARNING: You have pressed A at least {MAX_A_PRESS} times in a row. This is a task that may be suitable for a subagent."
+            dir_count = 0
+            for button in reversed(self.button_history):
+                if button not in ["left", "right", "down", "up"]:
+                    break
+                dir_count += 1
+                if dir_count > MAX_DIRECTION_PRESS:
+                    button_repetition_warning = f"\nWARNING: You have pressed a direction button at least {MAX_A_PRESS} times in a row. It looks like you may be navigating or trying to talk. Use navigate_to_coordinate or talk_to_npc instead."
+
         result, last_coords = self.emulator.press_buttons(buttons, wait)
         
         self.last_coords = last_coords
@@ -713,7 +743,7 @@ class SimpleAgent:
                 "tool_use_id": tool_id,
                 "content": [
                     {"type": "text", "text": (
-                        f"Pressed buttons: {', '.join(buttons)}"
+                        f"Pressed buttons: {', '.join(buttons)}" + button_repetition_warning
                     )}
                 ],
             }
@@ -752,6 +782,7 @@ class SimpleAgent:
                 last_checkpoints = '\n'.join(self.checkpoints[-10:])
                 content = [
                         {"type": "text", "text": f"Navigation result: {result}"},
+                        {"type": "text", "text": button_repetition_warning},
                         {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
                         {"type": "text", "text": f"\nLabeled nearby locations: {','.join(f'{coords}: {label}' for coords, label in all_labels)}"},
                         {"type": "text", "text": f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}"},
@@ -769,6 +800,7 @@ class SimpleAgent:
                 last_checkpoints = '\n'.join(self.checkpoints[-10:])
                 content = [
                         {"type": "text", "text": f"Pressed buttons: {', '.join(buttons)}"},
+                        {"type": "text", "text": button_repetition_warning},
                         {"type": "text", "text": "\nHere is a screenshot of the screen after your button presses:"},
                         {
                             "type": "image",
@@ -1022,6 +1054,9 @@ BTW: the Senior Agent is an instance of {FRIENDLY_MODEL_NAME_LOOKUP[MODEL]}. Ple
 
 Senior Agent: {detailed_instructions}.
 
+DEVELOPER TIP: if you are being asked to run dialogue to completion, make sure not to report done until you've CLOSED the dialog window (window is not on screen and dialog reported by the game is None.)
+Otherwise the Senior Agent will be forced to make another call just to close the window. However, you may end early if there is a key decision to make.
+
 Additional Instructions:
 
 Senior Agent: {additional_detailed_instructions}
@@ -1034,7 +1069,7 @@ as described here:
 
 Senior Agent: {return_instructions}
 
-If you failed the task or having serious difficulty or think it can no longer be done, instead call "task_aborted" and explain why.
+If you failed the task or having serious difficulty or think it can no longer be done, instead call "task_aborted" and explain why. This includes trying the same button press 10+ times with no result.
 
 Extra tip: When in dialogue or combat, be careful about pressing A too many times. This can easily skip the dialogue you are trying to see!
 Extra tip: Think carefully before trying to move: Is there dialogue on the screen? Typically you need to exit dialogue with A before being allowed to move.
@@ -1075,6 +1110,10 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
                 "content": [
                 ],
             }
+        elif tool_name == "talk_to_npc":
+            row = tool_input["row"]
+            col = tool_input["col"]
+            return self.talk_to_npc(col, row, tool_id, False)
         else:
             logger.error(f"Unknown tool called: {tool_name}")
             return {
@@ -1084,20 +1123,137 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
                     {"type": "text", "text": f"Error: Unknown tool '{tool_name}'"}
                 ],
             }
-
-    def navigate_to_coordinate(self, col: int, row: int, tool_id: str):
-        _, location, coords = self.emulator.get_state_from_memory()
-        full_map = self.update_and_get_full_collision_map()
-        
-        final_distance = self.full_collision_map[location].distances.get((col, row))
-        if final_distance is None:
-                return {
+    
+    # TODO: This section is due for a refactor, since these tools are shared by subagents, but now awkwardly use this logic.
+    # Heck, this one is _only_ used by the subagent.
+    def talk_to_npc(self, col: int, row: int, tool_id, is_subagent: bool=False) -> dict[str, Any]:
+        # Look for NPC/items/sprites within 1 tile. Abort if none or greater than one found.
+        sprites = self.emulator.get_sprites()  # These sprite locations are on this map, though, not the whole map
+        player_coords = self.emulator.get_coordinates()
+        valid_sprites = []
+        for sprite_col, sprite_row in sprites:
+            if sprite_col == 4 and sprite_row == 4:
+                # Skip the player themselves.
+                continue
+            real_row = player_coords[1] + sprite_row - 4
+            real_col = player_coords[0] + sprite_col - 4
+            # Exact match found, we are done.
+            if real_row == row and real_col == col:
+                valid_sprites = [(real_col, real_row)]  # We don't care what else was found, clear the list.
+                break
+            if abs(real_row - row) <= 1 and abs(real_col - col) <= 1:
+                valid_sprites.append((real_col, real_row))
+        if not valid_sprites:
+            return {
                 "type": "tool_result",
                 "tool_use_id": tool_id,
                 "content": [
-                    {"type": "text", "text": f"Invalid coordinates; Navigation too far or not possible."}
+                    {"type": "text", "text": f"Invalid coordinates; No NPCS or Items within one tile."}
                 ],
             }
+        if len(valid_sprites) > 1:
+            return {
+                "type": "tool_result",
+                "tool_use_id": tool_id,
+                "content": [
+                    {"type": "text", "text": f"Invalid ambiguous coordinates; No exact match, and more than one NPC or Item within one tile."}
+                ],
+            }
+        goal_col, goal_row = valid_sprites[0]
+
+        location = self.emulator.get_location()
+        _ = self.update_and_get_full_collision_map()
+        two_tile_warning = ""
+        # Search for reachable tiles within 1 tile of the NPC:
+        for walk_col, walk_row in [(goal_col - 1, goal_row), (goal_col + 1, goal_row), (goal_col, goal_row - 1), (goal_col, goal_row + 1)]:
+                valid_pathing = self.full_collision_map[location].distances.get((walk_col, walk_row))
+                if valid_pathing is not None:
+                    break
+        else:
+            two_tile_warning = "\nWarning: Space next to NPC not found; Going two-tiles away instead to try to talk instead. Maybe this is Nurse Joy or the shopkeeper?"
+            # Now try 2 tiles away. This is specifically for the likes of nurse joy and the shopping ladies.
+            for walk_col, walk_row in [(goal_col - 2, goal_row), (goal_col + 2, goal_row), (goal_col, goal_row - 2), (goal_col, goal_row + 2)]:
+                valid_pathing = self.full_collision_map[location].distances.get((walk_col, walk_row))
+                if valid_pathing is not None:
+                    break
+            else:
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": f"Talk to NPC failed: NPC seems unreachable"}
+                    ],
+                }
+
+        # Might as well get walking
+        navigation_result = self.navigate_to_coordinate(walk_col, walk_row, tool_id, is_subagent=is_subagent)
+        # extract result string
+        navigation_result_content = navigation_result["content"]
+        navigation_result_line = navigation_result_content[0]  # We drop everything but the first line to avoid repetitive screenshots etc.
+
+        # Now face the NPC. We exploit the fact that if they're really there (or we can't reach the tile next to them), we can freely press the button and just expect to be blocked.
+        # if we're _not_ blocked, then the NPC must have moved.
+        cur_coor = self.emulator.get_coordinates()
+        if walk_col < goal_col:
+            direction = "right"
+        elif walk_col > goal_col:
+            direction = "left"
+        elif walk_row > goal_row: 
+            direction = "up"
+        else:
+            direction = "down"
+        button_press_result = self.press_buttons([direction, "a"], True, tool_id, is_subtool=is_subagent)
+        button_press_result_content = button_press_result["content"]  # Here we keep the content, since this contains the screenshot etc. the model needs.
+
+        # Did we move?
+        npc_move_warning = ""
+        if self.emulator.get_coordinates() != cur_coor:
+            npc_move_warning = "\nWarning: The NPC seems to have moved during walking. Talking may be unsuccessful."
+
+        # is there dialogue on screen now?
+        no_dialogue_warning = ""
+        dialogue = self.emulator.get_dialogue()
+        if not dialogue:
+            no_dialogue_warning = "\nWarning: No dialogue seen."
+
+        return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": f"Talk to NPC attempt completed. Check the screen for dialogue!" + no_dialogue_warning + npc_move_warning + two_tile_warning},
+                        navigation_result_line,
+                        *button_press_result_content
+                    ],
+                }
+
+
+    def navigate_to_coordinate(self, col: int, row: int, tool_id: str, is_subagent: bool=False) -> dict[str, Any]:
+        location = self.emulator.get_location()
+        full_map = self.update_and_get_full_collision_map()
+        
+        one_tile_off_warning = ""
+        final_distance = self.full_collision_map[location].distances.get((col, row))
+        if final_distance is None:
+            # Try one tile to the right or left.
+            for x in range(col-1, col+2):
+                for y in range(row-1, row+2):
+                    final_distance = self.full_collision_map[location].distances.get((x, y))
+                    if final_distance is not None:
+                        col = x
+                        row = y
+                        break
+                if final_distance is not None:
+                    break
+            else:
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": f"Invalid coordinates; Navigation too far or not possible (Even for nearby tiles)."}
+                    ],
+                }
+            
+            one_tile_off_warning = f"\nWARNING: Exact tile is inaccessible. Instead pathing to {x, y}"
 
         if DIRECT_NAVIGATION:
             self.text_display.add_message(f"Navigating with existing map...")
@@ -1251,7 +1407,9 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 # tool_id = tool_call.call_id
             buttons = tool_input["buttons"]
             wait = tool_input.get("wait", True)
-        return self.press_buttons(buttons, wait, tool_id)
+        result = self.press_buttons(buttons, wait, tool_id, is_subtool=is_subagent)
+        result["content"].append({"type": "text", "text": "NAVIGATED USING navigate_to_coordinate" + one_tile_off_warning})
+        return result
 
     def run(self, num_steps=1, save_every=10, save_file_name: Optional[str] = None, _running_in_thread=False):
         """Main agent loop.

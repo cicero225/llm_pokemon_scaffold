@@ -5,9 +5,6 @@ from google.genai import types
 
 from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to_openai_format
 
-AVAILABLE_TOOLS = [
-]
-
 
 PRESS_BUTTON_SCHEMA = {
         "name": "press_buttons",
@@ -31,6 +28,53 @@ PRESS_BUTTON_SCHEMA = {
             "required": ["buttons"],
         },
     }
+
+PRESS_BUTTON_RESTRICTED_SCHEMA = {
+        "name": "press_buttons",
+        "description": "Press a sequence of buttons on the Game Boy.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "buttons": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["up", "down", "left", "right"]
+                    },
+                    "description": "List of buttons to press in sequence. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'"
+                },
+                "wait": {
+                    "type": "boolean",
+                    "description": "Whether to wait for a brief period after pressing each button. Defaults to true."
+                }
+            },
+            "required": ["buttons"],
+        },
+    }
+
+TALK_TO_NPC_SCHEMA = {
+        "name": "talk_to_npc",
+        "description": "Begine talking to a NPC or pick up an item at the coordinates. If the tile is empty, will try to find one within one tile of the given coordinates instead. Will abort if more than one found.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "row": {
+                    "type": "integer",
+                    "description": "The row coordinate of the NPC."
+                },
+                "col": {
+                    "type": "integer",
+                    "description": "The column coordinate of NPC."
+                }
+            },
+            "required": ["row", "col"],
+        },
+    }
+
+AVAILABLE_TOOLS = [
+    PRESS_BUTTON_RESTRICTED_SCHEMA,
+    TALK_TO_NPC_SCHEMA
+]
 
 AVAILABLE_TOOLS.append({
     "name": "use_subagent",
@@ -78,9 +122,9 @@ AVAILABLE_TOOLS.append({
     },
 })"""
 
-AVAILABLE_TOOLS.append({
+NAVIGATE_TO_COORDINATE_SCHEMA = {
     "name": "navigate_to_coordinate",
-    "description": "Will try to take you to a specific in your text map or on the screenshot",
+    "description": "Will try to take you to a specific coordinate in your text map or on the screenshot. If the exact coordinate is impassable, it will instead try to aim one tile to the side.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -95,7 +139,9 @@ AVAILABLE_TOOLS.append({
         },
         "required": ["row", "col"],
     },
-})
+}
+
+AVAILABLE_TOOLS.append(NAVIGATE_TO_COORDINATE_SCHEMA)
 
 AVAILABLE_TOOLS.append({
             "name": "bookmark_location_or_overwrite_label",

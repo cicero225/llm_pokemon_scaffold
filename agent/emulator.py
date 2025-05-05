@@ -11,6 +11,7 @@ import threading, queue
 from agent.memory_reader import PokemonRedReader, StatusCondition
 from PIL import Image
 from pyboy import PyBoy
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -647,6 +648,10 @@ class Emulator:
     def get_direction(self) -> str:
         full_map = self.pyboy.game_wrapper.game_area()
         return self._get_direction(full_map)
+    
+    def get_dialogue(self) -> Optional[str]:
+        reader = PokemonRedReader(self.pyboy.memory)
+        return reader.read_dialog()
 
     def get_state_from_memory(self, get_nearby_warps: bool=True) -> tuple[str, str, tuple[int, int]]:
         """
