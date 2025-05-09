@@ -290,7 +290,7 @@ class Emulator:
         downsampled_terrain = self._downsample_array(collision_map)
 
         # Get sprite locations
-        sprite_locations = self.get_sprites()
+        sprite_locations_and_ids = {x: y for x, y in self.get_sprites()}
 
         # Get character direction from the full map
         direction = self._get_direction(full_map)
@@ -312,9 +312,12 @@ class Emulator:
                 if i == 4 and j == 4:
                     # Player position with direction
                     row += player_char
-                elif (j, i) in sprite_locations:
+                elif (j, i) in sprite_locations_and_ids:
                     # Sprite position
-                    row += "S"
+                    if sprite_locations_and_ids[(j, i)] in [122, 123]:  # This is pokeball.
+                        row += "I"
+                    else:
+                        row += "S"
                 else:
                     # Terrain representation
                     if downsampled_terrain[i][j] == 0:
@@ -335,6 +338,7 @@ class Emulator:
                 "█ - Wall/Obstacle",
                 "· - Path/Walkable",
                 "S - Sprite",
+                "I - Item",
                 f"{direction_chars['up']}/{direction_chars['down']}/{direction_chars['left']}/{direction_chars['right']} - Player (facing direction)",
             ]
         )
@@ -355,8 +359,8 @@ class Emulator:
         # Player is always at position (4,4) in the 9x10 downsampled map
         valid_moves = []
 
-        # We need to check sprites too as they will block traversal
-        sprites = self.get_sprites()
+        # We need to check sprites too as they will block traversal. We don't care what the sprites _are_.
+        sprites = set(s[0] for s in self.get_sprites())
 
         # Special casing for warp tiles. If they're at a 0-coordinate we can safely assume the warp transition direction.
         # otherwise I haven't figured out how to figure it out so we just tell the model all directions are valid and just
@@ -427,13 +431,14 @@ class Emulator:
 
         return True
 
-    def get_sprites(self, debug=False):
+    def get_sprites(self, debug=False) -> set[tuple[tuple[int, int], int]]:
         """
         Get the location of all of the sprites on the screen.
-        returns set of coordinates that are (column, row)
+        returns set of coordinates that are (column, row), followed by the bottom sprite tile identifier
         """
         # Group sprites by their exact Y coordinate
         sprites_by_y = {}
+
 
         for i in range(40):
             sp = self.pyboy.get_sprite(i)
@@ -444,11 +449,11 @@ class Emulator:
 
                 if orig_y not in sprites_by_y:
                     sprites_by_y[orig_y] = []
-                sprites_by_y[orig_y].append((x, y, i))
+                sprites_by_y[orig_y].append((x, y, i, sp.tile_identifier))
 
         # Sort Y coordinates
         y_positions = sorted(sprites_by_y.keys())
-        bottom_sprite_tiles = set()
+        bottom_sprite_tiles: set[tuple[tuple[int, int], int]] = set()
 
         if debug:
             print("\nSprites grouped by original Y:")
@@ -474,7 +479,11 @@ class Emulator:
                 for x in sprites_at_y2:
                     if x in sprites_at_y1:  # If there's a matching top sprite at this X
                         bottom_sprite = sprites_at_y2[x]
-                        bottom_sprite_tiles.add((x, bottom_sprite[1]))
+                        # I'm fairly certain bottom_sprite[3] only includes the "bottom" of a top-sprite bottom sprite combo in Red.
+                        # But that's okay for our purposes.
+                        # If we need top sprite it would just be sprites_at_y1[x][3]
+                        bottom_sprite_tiles.add(((x, bottom_sprite[1]), bottom_sprite[3])) 
+
                         if debug:
                             print(f"\nMatched sprites at x={x}, Y1={y1}, Y2={y2}")
 
@@ -497,7 +506,7 @@ class Emulator:
         # Get collision map, terrain, and sprites
         collision_map = self.pyboy.game_wrapper.game_area_collision()
         terrain = self._downsample_array(collision_map)
-        sprite_locations = self.get_sprites()
+        sprite_locations = set(s[0] for s in self.get_sprites())
 
         # Get full map for tile values and current tileset
         full_map = self.pyboy.game_wrapper._get_screen_background_tilemap()
@@ -648,10 +657,6 @@ class Emulator:
     def get_direction(self) -> str:
         full_map = self.pyboy.game_wrapper.game_area()
         return self._get_direction(full_map)
-    
-    def get_dialogue(self) -> Optional[str]:
-        reader = PokemonRedReader(self.pyboy.memory)
-        return reader.read_dialog()
 
     def get_state_from_memory(self, get_nearby_warps: bool=True) -> tuple[str, str, tuple[int, int]]:
         """

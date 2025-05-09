@@ -105,6 +105,7 @@ def extract_tool_calls_from_gemini(response: types.GenerateContentResponse) -> t
                                         list_arg_value.append(x)
                                     arg_value = list_arg_value
                             dict_args[arg_key] = arg_value
+                        global MALFORMED_STRING
                         tool_id = str(MALFORMED_STRING)
                         MALFORMED_STRING += 1 
                         assistant_content.append({"type": "tool_use", "id": tool_id, "input": dict_args, "name": tool_name})

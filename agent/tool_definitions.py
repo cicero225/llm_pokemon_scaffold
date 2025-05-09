@@ -218,7 +218,7 @@ OPENAI_TOOLS = convert_tool_defs_to_openai_format(AVAILABLE_TOOLS)
 
 # Just a copy of everything without the detailed_navigator or mark_checkpoint, so it can't call itself or wipe the exploration log.
 NAVIGATOR_TOOLS = []
-for entry in AVAILABLE_TOOLS + [PRESS_BUTTON_SCHEMA]:
+for entry in AVAILABLE_TOOLS:
     if entry["name"] in ["detailed_navigator", "mark_checkpoint", "use_subagent"]:
         continue
     NAVIGATOR_TOOLS.append(entry)

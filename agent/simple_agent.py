@@ -41,12 +41,16 @@ FRIENDLY_MODEL_NAME_LOOKUP = {
 BASE_IMAGE_SIZE = (160, 144)  # In tiles, 16 x 10 columns and 16 x 9 rows
 
 # Handles making an automatically updating collision map of an area as the model paths through it.
+# This structure assumes there's only one type of entry per tile, but actually tiles can be both IMPASSABLE and SPRITES or a Player or Sprite can be standing on a warp.
+# This is an oversight that should maybe be fixed, but is hard to fix without a lot of restructuring.
 class LocationCollisionMap:
-    def __init__(self, initial_collision_map: np.ndarray, initial_sprite_locations: set[tuple[int, int]], initial_coords: tuple[int, int]):
+    def __init__(self, initial_collision_map: np.ndarray, initial_sprite_locations: set[tuple[tuple[int, int], int]], initial_coords: tuple[int, int], nearby_warps: Optional[list[tuple[int, int]]]=None):
         # initial_collision_map is a 9 x 10 player-centered collision map which is 0 is impassable and 1 otherwise
-        # Internally we store an expanding map based on locations we've been, with -1 in unknown spots, 2 in sprite locations, 3 in player location, and otherwise 0/1 as well.
+        # Internally we store an expanding map based on locations we've been, with -1 in unknown spots, 2 in sprite locations, 3 in player location, 4 is item locations, 5 is warps, and otherwise 0/1 as well.
         # We just accept that moving NPC locations are going to be inaccurate.
         # Note that while player coords are column, row, by default what we get from the collision map tooling is row, column
+        sprite_lookup = {x: y for x, y in initial_sprite_locations}
+        
         self.player_coords = initial_coords
         self.col_offset = initial_coords[0] - 4
         self.row_offset = initial_coords[1] - 4
@@ -55,17 +59,24 @@ class LocationCollisionMap:
             for col in range(10):
                 if row == 4 and col == 4:  # player character
                     self.internal_map[col][row] = 3
-                elif (col, row) in initial_sprite_locations:
-                    self.internal_map[col][row] = 2
+                elif nearby_warps is not None and (col + self.col_offset, row + self.row_offset) in nearby_warps:
+                    self.internal_map[col][row ] = 5
+                    continue
+                elif (col, row) in sprite_lookup:
+                    if sprite_lookup[(col, row)] in [122, 123]:  # This is pokeball
+                        self.internal_map[col][row] = 4
+                    else:
+                        self.internal_map[col][row] = 2
                 else:
                     self.internal_map[col][row] = initial_collision_map[row][col]
         self.distances: dict[tuple[int, int], int] = {}
 
-    def update_map(self, collision_map: np.ndarray, sprite_locations: set[tuple[int, int]], coords: tuple[int, int]):
+    def update_map(self, collision_map: np.ndarray, sprite_locations: set[tuple[tuple[int, int], int]], coords: tuple[int, int], nearby_warps: Optional[list[tuple[int, int]]]=None):
         # Remove the previous player marker. Most convenient to do it right now.
         self.internal_map[self.player_coords[0] - self.col_offset][self.player_coords[1] - self.row_offset] = 1
         self.player_coords = coords
 
+        sprite_lookup = {x: y for x, y in sprite_locations}
         new_min_col = coords[0] - 4
         new_min_row = coords[1] - 4
         new_max_col = coords[0] + 5
@@ -88,13 +99,22 @@ class LocationCollisionMap:
         local_row_offset = new_min_row - self.row_offset
         for row in range(9):
             for col in range(10):
-                if row == 4 and col == 4:  # player character
+                if row == 4 and col == 4:  # player character. It's okay to wipe warp information temporarily because it's almost certainly coming back.
                     self.internal_map[col + local_col_offset][row + local_row_offset] = 3
+                    continue
+                if self.internal_map[col + local_col_offset][row + local_row_offset] == 5:  # otherwise we don't wipe this for any reason
+                    continue
+                # Warp takes precendence over anything else below.
+                if nearby_warps is not None and (col + new_min_col, row + new_min_row) in nearby_warps:
+                    self.internal_map[col + local_col_offset][row + local_row_offset] = 5
                     continue
                 # if self.internal_map[col + local_col_offset][row + local_row_offset] != -1:
                     # continue  # No need to set, and if we do it's just going to lead to extra sprites for moving NPCs
-                if (col, row) in sprite_locations:
-                    self.internal_map[col + local_col_offset][row + local_row_offset] = 2
+                if (col, row) in sprite_lookup:
+                    if sprite_lookup[(col, row)] in [122, 123]:
+                        self.internal_map[col + local_col_offset][row + local_row_offset] = 4
+                    else:
+                        self.internal_map[col + local_col_offset][row + local_row_offset] = 2
                 else:
                     self.internal_map[col + local_col_offset][row + local_row_offset] = collision_map[row][col]
         self.distances = self.compute_effective_distance_to_tiles()
@@ -172,7 +192,7 @@ class LocationCollisionMap:
         base_str += (width - 1 - len(base_str))*" "
         return f"|{base_str}"
 
-    def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None, nearby_warps: Optional[list[tuple[int, int]]]=None, direction: Optional[str]=None) -> str:
+    def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None, direction: Optional[str]=None) -> str:
 
         # We prepare two identical versions simultaneously: A readable nice ASCII for humans, and the long-winded one for models
 
@@ -223,10 +243,10 @@ class LocationCollisionMap:
             row_human = row + "|"
             for col_num, col in enumerate(this_row):
                 real_col = self.col_offset + col_num
-                if nearby_warps is not None and (real_col, real_row) in nearby_warps:
-                    row += "Warp"
-                    row_human += " ww "
-                elif col == -1:
+                # Here we face the price of previous mistakes. We wouldn't need a nearby_warps argument if it weren't
+                # for the case that we can't log both a player character and warp or sprite in the same spot.
+                # Because of this, we now have an edge case if the player character is on a warp, or a sprite is.
+                if col == -1:
                     row += self.make_ascii_segment("Check here", row_width, real_col, real_row)
                     row_human += " uu "
                 elif col == 0:
@@ -256,6 +276,12 @@ class LocationCollisionMap:
                 elif col == 3:
                     row += self.make_ascii_segment(f"PLAYER (Facing {direction})" , row_width, real_col, real_row)
                     row_human += " PP "
+                elif col == 4:
+                    row += self.make_ascii_segment(f"Item" , row_width, real_col, real_row)
+                    row_human += " PP "
+                elif col == 5:
+                    row += "Warp"
+                    row_human += " ww "
             row += f"|{str(real_row)}"
             row_human += f"|{str(real_row)}"
             lines.append(row)
@@ -394,7 +420,7 @@ class SimpleAgent:
         collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
         downsampled_terrain = self.emulator._downsample_array(collision_map)
 
-        sprite_locations = self.emulator.get_sprites()
+        sprite_locations_and_ids = {x: y for x, y in self.emulator.get_sprites()}
 
         if not self.emulator.get_in_combat():
             shape = screenshot.size
@@ -431,7 +457,7 @@ class SimpleAgent:
                             tile_label += "\n" + label
                         if show_nearby_warps and (real_col, real_row) in nearby_warps:
                             tile_label += "\n" + "WARP"
-                        if (col, row) not in sprite_locations:
+                        if (col, row) not in sprite_locations_and_ids:
                             if downsampled_terrain[row][col] == 0:
                                 # ImageDraw.Draw(screenshot).rectangle(((col * tile_size + (relative_square_size - 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size - 1)*mid_length/relative_square_size), (col * tile_size + (relative_square_size + 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size + 1)*mid_length/relative_square_size)), (255, 0, 0))
                                 tile_label += "\n" + "IMPASSABLE"
@@ -446,8 +472,11 @@ class SimpleAgent:
                                 else:
                                     tile_label += "\n" + "CHECK\nHERE"
                         else:
-                            # ImageDraw.Draw(screenshot).rectangle(((col * tile_size + (relative_square_size - 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size - 1)*mid_length/relative_square_size), (col * tile_size + (relative_square_size + 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size + 1)*mid_length/relative_square_size)), (255, 0, 255))
-                            tile_label += "\n" + "NPC/OBJECT"
+                            if sprite_locations_and_ids[(col, row)] in [122, 123]:  # this is pokeball
+                                tile_label += "\n" + "ITEM"
+                            else:
+                                # ImageDraw.Draw(screenshot).rectangle(((col * tile_size + (relative_square_size - 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size - 1)*mid_length/relative_square_size), (col * tile_size + (relative_square_size + 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size + 1)*mid_length/relative_square_size)), (255, 0, 255))
+                                tile_label += "\n" + "NPC/OBJECT"
                         font_size = 8
                         if MODEL == "GEMINI":
                             font_size = 12
@@ -528,14 +557,15 @@ class SimpleAgent:
                     self.button_history = pickle.load(fr)
                 except Exception:
                     pass
+            breakpoint()
         except FileNotFoundError:
             logger.warn("No Location archive! Making new one...")
         if not isinstance(self.message_history[-1]['content'], str):
-            for entry in self.message_history[-1]['content']:
-                if entry['type'] == 'tool_use':
+            for entry in self.message_history[-1]['content']:  # In case we somehow got interrupted mid tool use for anything that isn't a subagent.
+                if entry['type'] == 'tool_use' and entry["name"] != "use_subagent":
                     self.message_history.pop()
                     break
-        if not isinstance(self.navigator_message_history[-1]['content'], str):
+        if self.navigator_message_history and 'content' in self.navigator_message_history[-1] and not isinstance(self.navigator_message_history[-1]['content'], str):
             for entry in self.navigator_message_history[-1]['content']:
                 if entry['type'] == 'tool_use':
                     self.navigator_message_history.pop()
@@ -646,11 +676,11 @@ class SimpleAgent:
         # slightly more efficient than setdefault
         this_map = self.full_collision_map.get(location)
         if this_map is None:
-            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords)
-            return self.full_collision_map[location].to_ascii(local_location_tracker, nearby_warps, direction=direction)
+            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps)
+            return self.full_collision_map[location].to_ascii(local_location_tracker, direction=direction)
         else:
-            this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords)
-            return this_map.to_ascii(local_location_tracker, nearby_warps, direction=direction)
+            this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps)
+            return this_map.to_ascii(local_location_tracker, direction=direction)
         
     def get_all_location_labels(self, location: str) -> list[tuple[tuple[int, int], str]]:
         all_labels: list[tuple[tuple[int, int], str]] = []
@@ -697,7 +727,7 @@ class SimpleAgent:
                 if dir_count > MAX_DIRECTION_PRESS:
                     button_repetition_warning = f"\nWARNING: You have pressed a direction button at least {MAX_A_PRESS} times in a row. It looks like you may be navigating or trying to talk. Use navigate_to_coordinate or talk_to_npc instead."
 
-        result, last_coords = self.emulator.press_buttons(buttons, wait)
+        result, last_coords = self.emulator.press_buttons(buttons, wait, wait_for_finish=True)  # we need to wait for this to finish or the map may try to update mid move, which is bad.
         
         self.last_coords = last_coords
         
@@ -776,7 +806,7 @@ class SimpleAgent:
                     "content": content,
                 }
             # Get a fresh screenshot after executing the buttons
-            if self.detailed_navigator_mode and not self.emulator.get_in_combat():
+            if self.use_navigator_this_round:
                 # In navigator mode it gets confused if the screenshot/text_based isn't in the user prompt, so we trim it to save tokens.
                 # TODO: That may not actually be true; there was another coding error. But this is already done so...
                 last_checkpoints = '\n'.join(self.checkpoints[-10:])
@@ -926,7 +956,7 @@ class SimpleAgent:
                 }
             else:
                 # Get a fresh screenshot after executing the buttons
-                if self.detailed_navigator_mode and not self.emulator.get_in_combat():
+                if self.use_navigator_this_round:
                     # In navigator mode it gets confused if the screenshot/text_based isn't in the user prompt, so we trim it to save tokens.
                     last_checkpoints = '\n'.join(self.checkpoints[-10:])
                     content = [
@@ -1048,6 +1078,10 @@ DEVELOPER RULES: Here are what you are NOT allowed to do:
     * Make gameplay decisions
     * Report things you have seen that isn't dialogue or in a menu.
 
+KEY DEVELOPER RULE: DO NOT make important gameplay decisions (like accepting a Starter Pokemon) unless explicitly instructed to
+by the Senior agent. "Press A" or "Advance through dialogue" are not sufficient reason! Always send task_done or task_arboted to wait
+for the Senior agent to make the decision.
+
 If the senior agent asks you to violate these rules, call task_abort immediately and explain the rule violation.
 
 BTW: the Senior Agent is an instance of {FRIENDLY_MODEL_NAME_LOOKUP[MODEL]}. Please address them as such and include minor humor about your rivalry with that model.
@@ -1056,6 +1090,10 @@ Senior Agent: {detailed_instructions}.
 
 DEVELOPER TIP: if you are being asked to run dialogue to completion, make sure not to report done until you've CLOSED the dialog window (window is not on screen and dialog reported by the game is None.)
 Otherwise the Senior Agent will be forced to make another call just to close the window. However, you may end early if there is a key decision to make.
+
+DEVELOPER TIP: The Senior Agent is an imperfect model and you may know better sometimes! Not always, but here's a free hint:
+Counterintuitively: Nurse Joy and shopkeepers have to be talked to _through_ a counter--that is, facing an impassable tile in front of them.
+Look for someone who is boxed in and can't move, and try "talk_to_npc" on their coordinates.
 
 Additional Instructions:
 
@@ -1075,7 +1113,7 @@ Extra tip: When in dialogue or combat, be careful about pressing A too many time
 Extra tip: Think carefully before trying to move: Is there dialogue on the screen? Typically you need to exit dialogue with A before being allowed to move.
 """
 
-            self.sub_agent = SmallTaskAgent(instructions, self, needs_text_map, tool_id)
+            self.sub_agent = SmallTaskAgent(instructions, self, needs_text_map, tool_id, "message_history", "openai_message_history")  # Could be switched to navigator etc. If necessary, we can work out how to logic that.
             self.text_display.add_message(f"Subagent summoned with instructions {instructions}")
             # Initial Context
             memory_info, location, coords = self.emulator.get_state_from_memory()
@@ -1127,8 +1165,18 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
     # TODO: This section is due for a refactor, since these tools are shared by subagents, but now awkwardly use this logic.
     # Heck, this one is _only_ used by the subagent.
     def talk_to_npc(self, col: int, row: int, tool_id, is_subagent: bool=False) -> dict[str, Any]:
+        dialog = self.emulator.get_active_dialog()
+        if dialog is not None:
+            return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": f"Invalid. Movement not possible while there is already active dialogue on screen."}
+                    ],
+                }
+        
         # Look for NPC/items/sprites within 1 tile. Abort if none or greater than one found.
-        sprites = self.emulator.get_sprites()  # These sprite locations are on this map, though, not the whole map
+        sprites = set(s[0] for s in self.emulator.get_sprites())  # These sprite locations are on this map, though, not the whole map
         player_coords = self.emulator.get_coordinates()
         valid_sprites = []
         for sprite_col, sprite_row in sprites:
@@ -1212,7 +1260,7 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
 
         # is there dialogue on screen now?
         no_dialogue_warning = ""
-        dialogue = self.emulator.get_dialogue()
+        dialogue = self.emulator.get_active_dialog()
         if not dialogue:
             no_dialogue_warning = "\nWarning: No dialogue seen."
 
@@ -1228,6 +1276,16 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
 
 
     def navigate_to_coordinate(self, col: int, row: int, tool_id: str, is_subagent: bool=False) -> dict[str, Any]:
+        dialog = self.emulator.get_active_dialog()
+        if dialog is not None:
+            return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": f"Invalid. Navigation not possible while there is active dialogue on screen."}
+                    ],
+                }
+        
         location = self.emulator.get_location()
         full_map = self.update_and_get_full_collision_map()
         
@@ -1443,19 +1501,25 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
             try:
                 location = self.emulator.get_location()
                 coords = self.emulator.get_coordinates()
+                # We need to set this NOW and NOT CHANGE IT until the next step, even if the combat state changes (which it can, if we're emerging from combat), or else we get crashes.
+                # This doesn't need to go in the save I think though.
+                self.use_navigator_this_round = self.detailed_navigator_mode and not self.emulator.get_in_combat()
                 if location not in self.all_visited_locations:
                     self.text_display.add_message(f"New Location reached! {location} at {self.absolute_step_count}")
                     self.location_milestones.append((location, self.absolute_step_count))
                     self.all_visited_locations.add(location)
                 self.last_coords = coords
-
                 # If we are running a subagent, we do that instead.
                 if self.sub_agent is not None:
                     malformed = False
                     continue_subtool, subtool_status = self.sub_agent.step()
                 else:
+                    # Validate message history: Somehow this happens sometimes and I would like to understand
+                    # why.
+                    if len(self.message_history) > 1 and 'type' in self.message_history[-1] and self.message_history[-1]['type'] == "tool_result" and self.message_history[-2]['type'] == "tool_result":
+                        breakpoint()
                     malformed = False
-                    if self.detailed_navigator_mode and not self.emulator.get_in_combat():
+                    if self.use_navigator_this_round:
                         self.text_display.add_message("NAVIGATOR MODE")
                         screenshot = self.emulator.get_screenshot()
                         screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
@@ -1494,16 +1558,31 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
 
                     token_usage = 0
 
-                    use_navigator_model = self.detailed_navigator_mode and not self.emulator.get_in_combat()
+                    if self.detailed_navigator_mode:
+                        # Or else the model may try to use it, and that makes no sense.
+                        MODIFIED_AVAILABLE_TOOLS = []
+                        for entry in AVAILABLE_TOOLS:
+                            if entry["name"] in ["detailed_navigator"]:
+                                continue
+                            MODIFIED_AVAILABLE_TOOLS.append(entry)
+
+
+                        GOOGLE_MODIFIED_TOOLS = convert_tool_defs_to_google_format(MODIFIED_AVAILABLE_TOOLS)
+                        OPENAI_MODIFIED_TOOLS = convert_tool_defs_to_openai_format(MODIFIED_AVAILABLE_TOOLS)
+                    else:
+                        MODIFIED_AVAILABLE_TOOLS = AVAILABLE_TOOLS
+                        GOOGLE_MODIFIED_TOOLS = GOOGLE_TOOLS
+                        OPENAI_MODIFIED_TOOLS = OPENAI_TOOLS
+
                     # Get model response
                     if MODEL == "CLAUDE":
-                        instructions = FULL_NAVIGATOR_PROMPT if use_navigator_model else SYSTEM_PROMPT
+                        instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT
                         response = self.anthropic_client.messages.create(
                             model=ANTHROPIC_MODEL_NAME,
                             max_tokens=MAX_TOKENS,
                             system=instructions,
                             messages=messages,
-                            tools=NAVIGATOR_TOOLS if use_navigator_model else AVAILABLE_TOOLS,
+                            tools=NAVIGATOR_TOOLS if self.use_navigator_this_round else MODIFIED_AVAILABLE_TOOLS,
                             temperature=TEMPERATURE,
                         )
                         token_usage = response.usage.input_tokens + response.usage.output_tokens
@@ -1534,12 +1613,12 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                         # messages -> Gemini format
                         google_messages = convert_anthropic_message_history_to_google_format(messages)
 
-                        instructions = FULL_NAVIGATOR_PROMPT if self.detailed_navigator_mode and not self.emulator.get_in_combat() else SYSTEM_PROMPT
+                        instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT
                         config=types.GenerateContentConfig(
                                 max_output_tokens=None,
                                 temperature=TEMPERATURE,
                                 system_instruction=instructions,
-                                tools=GOOGLE_NAVIGATOR_TOOLS if self.detailed_navigator_mode and not self.emulator.get_in_combat() else GOOGLE_TOOLS
+                                tools=GOOGLE_NAVIGATOR_TOOLS if self.use_navigator_this_round else GOOGLE_MODIFIED_TOOLS
                             )
                         chat = self.gemini_client.chats.create(
                             model=GEMINI_MODEL_NAME,
@@ -1569,7 +1648,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     elif MODEL == "OPENAI":
                         # For openai we need to add a screenschot too to tool calls or it gets very confused.
                         # Get a fresh screenshot after executing the buttons
-                        messages_to_use = self.openai_navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.openai_message_history
+                        messages_to_use = self.openai_navigator_message_history if self.use_navigator_this_round else self.openai_message_history
                         
                         self.strip_text_map_and_images_from_history(messages_to_use, openai_format=True)
                         
@@ -1607,7 +1686,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                                 "role": "user",
                                 "content": content,  # type: ignore
                             })
-                        instructions = FULL_NAVIGATOR_PROMPT if self.detailed_navigator_mode and not self.emulator.get_in_combat() else SYSTEM_PROMPT_OPENAI
+                        instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT_OPENAI
                         retries = 2
                         cur_tries = 0
                         while cur_tries < retries:
@@ -1618,7 +1697,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                                     instructions=instructions,
                                     max_output_tokens=MAX_TOKENS_OPENAI,
                                     temperature=TEMPERATURE,
-                                    tools=OPENAI_NAVIGATOR_TOOLS if self.detailed_navigator_mode and not self.emulator.get_in_combat() else OPENAI_TOOLS
+                                    tools=OPENAI_NAVIGATOR_TOOLS if self.use_navigator_this_round else OPENAI_MODIFIED_TOOLS
                                 )
                                 break
                             except BadRequestError as e:
@@ -1693,8 +1772,8 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                         token_usage = response.usage.total_tokens if response.usage is not None else 0
                         
 
-                    openai_messages_to_use = self.openai_navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.openai_message_history
-                    messages_here = self.navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.message_history
+                    openai_messages_to_use = self.openai_navigator_message_history if self.use_navigator_this_round else self.openai_message_history
+                    messages_here = self.navigator_message_history if self.use_navigator_this_round else self.message_history
 
                     # Process tool calls
                     if tool_calls: 
@@ -1762,9 +1841,11 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                                     )}
                                 ],
                             }]
+                    # Welcome to an edge case. It is possible for the subagent to transition between states, so it becomes ambiguous which stack to return the tool call result too.
+                    # so, the sub_agent itself needs to hold this information.
+                    openai_messages_to_use = getattr(self, self.sub_agent.openai_message_history_to_append)
+                    messages_here = getattr(self, self.sub_agent.message_history_to_append)
                     self.sub_agent = None
-                    openai_messages_to_use = self.openai_navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.openai_message_history
-                    messages_here = self.navigator_message_history if self.detailed_navigator_mode and not self.emulator.get_in_combat() else self.message_history
                     tool_calls = "Something"  # It doesn't matter, I'm just preventing a later if statement from noticing there are "no" tool calls
 
                 # If the sub_agent is active, we need to temporarily bypass everything. Otherwise this handles post tool_call cleanup
@@ -1778,7 +1859,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     )
                     
                     # Check if we need to summarize the history
-                    if self.detailed_navigator_mode and not self.emulator.get_in_combat():
+                    if self.use_navigator_this_round:
                         # No agentic in navigator mode
                         if len(self.navigator_message_history) >= self.max_history:
                             # Truncation is not as straightforward as I'd like, because of the potential to break tool calls
@@ -2042,7 +2123,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     max_output_tokens=None,
                     temperature=TEMPERATURE,
                     system_instruction=instructions,
-                    tools=GOOGLE_TOOLS
+                    tools=GOOGLE_MODIFIED_TOOLS
                 )
             chat = self.gemini_client.chats.create(
                 model=GEMINI_MODEL_NAME,
@@ -2103,7 +2184,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 instructions=instructions,
                 max_output_tokens=MAX_TOKENS_OPENAI,
                 temperature=TEMPERATURE,
-                tools=OPENAI_TOOLS
+                tools=OPENAI_MODIFIED_TOOLS
             )
             # Gather Reasoning and tool calls
             response_texts = ""
@@ -2138,7 +2219,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 for entry in all_warps:
                     if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
                         nearby_warps.append(entry)
-                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), nearby_warps=nearby_warps, direction=self.emulator.get_direction())
+                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), direction=self.emulator.get_direction())
             else:
                 collision_map = "Not yet available"
 

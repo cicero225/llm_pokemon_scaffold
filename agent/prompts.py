@@ -228,7 +228,7 @@ One big sign of navigation problems is if the model has been trying to navigate 
 PRIORITY THREE: The agent is often short-sighted and plans for the short-tern. You should try to keep long-term goals in mind and remind them.
 
 TIPS TO PROVIDE FOR NAVIGATION:
-1. If a label is incorrect, STRONGLY ENCOURAGE stopping to edit the label to something else (potentially even " ").
+1. If the agent is in a maze, remind it of the importance of labeling dead-ends to avoid repeat visits.
 2. Remind the agent to consult its text_based map.
 3. Remember that "navigate_to_offscreen_coordinate" and the "detailed_navigator" tool are there to query for help.
 4. If they seem to be stuck in a location, emphasize the importance of NOT revisiting EXPLORED tiles. It may even be PRIORITY ONE to stop stepping on EXPLORED tiles.
@@ -237,16 +237,11 @@ TIPS TO PROVIDE FOR NAVIGATION:
     5b. In Mazes, it is important to label dead-ends to avoid repeated visits, particularly if they are covered in EXPLORED tiles.
     5c. 0, 0 is the topmost-leftmost part of the map.
     5d. A DEPTH-FIRST SEARCH, using EXPLORED tiles as markers of previous locations, is a great way to get through mazes. Don't turn around unless you run into a dead end.
-6. Remind about the BIG HINTS:
-   6a. Doors and stairs are NEVER IMPASSABLE.
-   6b. By extension, squares that are EXPLORED are NEVER Doors or stairs.
-   6c. IMPASSABLE Squares are never the exit from an area UNLESS they are directly on top of the black void at the edge of the map. There must be a passable (non-red) path INTO the black area for this to work.
-7. Pay attention to the text_based maps and whether the direction of travel is sensible. They may be pathing into a dead end!
+6. Pay attention to the text_based maps and whether the direction of travel is sensible. They may be pathing into a dead end!
    
 
 OTHER NOTES:
 1. If the wrong NPC is talked to frequently, remind yourself to label a wrong NPC's location (on the NPC's location)
-2. If they are trying to reach a location on screen, remind them that the "navigate_to" tool may be able to get them there.
 
 When hinting, AVOID repeating coordinates or locations you do not see on screen from the conversation history -- the conversation is often
 mistaken about the exact location of objects or NPCs, and repeating it can reinforce the mistake.
@@ -358,6 +353,7 @@ More specifically, you will handle the following:
 3. Navigation: Use navigate_to_coordinate to traverse the map, and bookmark_location_or_overwrite_label to label discovered points of interest (particularly entrances and exist to locations)
     3a. "talk_to_npc" will attempt to path you to a NPC and start dialogue.
     3b. "detailed_navigator" will hand over control temporarily to an agent instructed to perform a depth-first search to help you navigate mazes.
+    3c. In mazes and other challenging areas, it is important to use bookmark_location_or_overwrite_label to label dead-ends (with no warps) to avoid revisiting the same spots. This is VERY IMPORTANT.
 4. Delegation: it will be necessary to call use_subagent to perform certain in-game tasks.
     4a. Here are the valid tasks subagents are allowed to do:
         * Talk to NPCs and record their dialogue
@@ -399,7 +395,8 @@ Tracking Progress
     2b. For a transition warp like a door or stairs, verify where it goes
 3. Label key navigation markers (like doors and stairs) for future reference.
 4. Label Key stationary NPCs (like Professor Oak) after talking to them.
-5. Use mark_checkpoint when you achieve a major objective (This can be navigational!) OR blackout
+5. Label dead-ends (with no warps) when in mazes to prevent repeated visits. REMEMBER TO DO THIS.
+6. Use mark_checkpoint when you achieve a major objective (This can be navigational!) OR blackout
     5a.  Make sure to call this ONLY when you've verified success. For example, after talking to Nurse Joy when looking for the Pokemon Center.
     5b. In Mazes, do not call this until you've completely escaped the maze and are in a new location. You also have to call it after blacking out,
     to reset navigation.
@@ -454,7 +451,7 @@ In "return_instructions", make sure to ask for any information you need back (e.
 
 detailed_navigator: When stuck on a difficult navigation task, ask this tool for help. Consider this if you've been in a location for a long number of steps, definitely if over 300.
 
-bookmark_location_or_overwrite_label: Use this to label navigation landmarks, NPCs, and warps.
+bookmark_location_or_overwrite_label: Use this to label navigation landmarks, NPCs, dead-ends, and warps.
 
 mark_checkpoint: call this when you achieve a major navigational objective OR blackout
 """

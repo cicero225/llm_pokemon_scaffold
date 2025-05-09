@@ -53,7 +53,7 @@ SMALL_TASK_TOOL_DEFINITIONS = [
 MAX_SUBAGENT_STEPS = 50
 
 class SmallTaskAgent:
-    def __init__(self, instructions: str, senior_agent: "SimpleAgent", include_text_map: bool, task_id: str):
+    def __init__(self, instructions: str, senior_agent: "SimpleAgent", include_text_map: bool, task_id: str, message_history_to_append: str, openai_message_history_to_append: str):
         self.instructions = instructions
         self.history: list[dict[str, Any]] =  []
         # Only now do we clarify the type, to avoid circular imports.
@@ -70,6 +70,10 @@ class SmallTaskAgent:
         self.logger = logger
         self.task_id = str(task_id)  # The id of the tool call for the senior agent. Used to return eventually.
         self.deferred_information: Optional[dict[str, Any]] = None
+        # We're starting to run into pickle limitations. It'd be natural to store a reference to the message history itself, but then it won't pickle the reference unless we also pickle SImpleAgent.
+        # and just letting that happen will cause all kinds of hard to diagnose bugs. Instead, we just store the name of the attribute...
+        self.message_history_to_append = message_history_to_append
+        self.openai_message_history_to_append = openai_message_history_to_append
 
     def provide_initial_context(self, initial_context: dict[str, Any]):
         self.history.append(initial_context)
