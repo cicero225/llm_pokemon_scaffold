@@ -215,6 +215,7 @@ class LocationCollisionMap:
                     "·· - CHECK HERE: Path/Walkable",
                     "SS - Sprite",
                     "PP - Player Character",
+                    "II - Item"
                     "xx - AVOID GOING HERE - Already Explored",
                     "uu - CHECK HERE: Blank = Unknown/Unvisited",
                     "ww - Warp",
@@ -230,6 +231,7 @@ class LocationCollisionMap:
                     "·· - Path/Walkable",
                     "SS - Sprite",
                     "PP - Player Character",
+                    "II - Item",
                     "ww - Warp",
                     "uu - Blank = Unknown/Unvisited"
                 ]
@@ -278,7 +280,7 @@ class LocationCollisionMap:
                     row_human += " PP "
                 elif col == 4:
                     row += self.make_ascii_segment(f"Item" , row_width, real_col, real_row)
-                    row_human += " PP "
+                    row_human += " II "
                 elif col == 5:
                     row += "Warp"
                     row_human += " ww "
@@ -297,6 +299,13 @@ class LocationCollisionMap:
             fw.write("\n\n" + "MODEL VERSION:" +"\n\n")
             fw.write(output)
         return output
+    
+    def is_in_map(self, col: int, row: int) -> bool:
+        if col < self.col_offset or row < self.row_offset or col - self.col_offset > self.internal_map.shape[0] - 1 or row - self.row_offset > self.internal_map.shape[1] - 1:
+            return False
+        if self.internal_map[col - self.col_offset][row - self.row_offset] == -1:
+            return False
+        return True
 
 # Updates a text file over time to write the last X blocks of text to a text file so we can see it well
 # with tail -F or something.
@@ -452,6 +461,10 @@ class SimpleAgent:
                             continue  # Skip the player themselves.
                         real_col = player_coords[0] + col - 4
                         label = local_cols.get(real_col, "")
+                        try:
+                            label, _ = label.split(": [LOGGED BY TOOL] ")  # Dialogue labels we cut off the second part since it's way too big for an image.
+                        except Exception as e:
+                            pass
                         tile_label = f"{str(real_col)}, {str(real_row)}"
                         if label:
                             tile_label += "\n" + label
@@ -663,7 +676,8 @@ class SimpleAgent:
                 breakpoint()
 
     def update_and_get_full_collision_map(self):
-        _, location, coords = self.emulator.get_state_from_memory()  # We call it within the update to make sure we can't accidentally give outdated information.
+        location = self.emulator.get_location()
+        coords = self.emulator.get_coordinates()
         collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
         downsampled_terrain = self.emulator._downsample_array(collision_map)
         local_location_tracker = self.location_tracker.get(location, [])
@@ -730,9 +744,11 @@ class SimpleAgent:
         result, last_coords = self.emulator.press_buttons(buttons, wait, wait_for_finish=True)  # we need to wait for this to finish or the map may try to update mid move, which is bad.
         
         self.last_coords = last_coords
+
+        location = self.emulator.get_location()
         
         # Get game state from memory after the action
-        memory_info, location, coords = self.emulator.get_state_from_memory()
+        memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
         # Log the memory state after the tool call
         logger.info(f"[Memory State after action]")
         logger.info(memory_info)
@@ -880,7 +896,8 @@ class SimpleAgent:
         elif tool_name == "navigate_to":  # Unused for now
             row = tool_input["row"]
             col = tool_input["col"]
-            memory_info, location, coords = self.emulator.get_state_from_memory()
+            location = self.emulator.get_location()
+            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
             self.text_display.add_message(f"[Navigation] Navigating to: ({col}, {row})")  # 8, 3 -> 6, 4 is 2, 5
             
             # The navigator goes to location on screen, with 0,0 at the top left.
@@ -903,7 +920,8 @@ class SimpleAgent:
                 result = f"Navigation failed: {status}"
             
             # Get game state from memory after the action
-            memory_info, location, coords = self.emulator.get_state_from_memory()
+            location = self.emulator.get_location()
+            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
 
             # Get a fresh screenshot after executing the buttons
             screenshot = self.emulator.get_screenshot()
@@ -1116,7 +1134,8 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
             self.sub_agent = SmallTaskAgent(instructions, self, needs_text_map, tool_id, "message_history", "openai_message_history")  # Could be switched to navigator etc. If necessary, we can work out how to logic that.
             self.text_display.add_message(f"Subagent summoned with instructions {instructions}")
             # Initial Context
-            memory_info, location, coords = self.emulator.get_state_from_memory()
+            location = self.emulator.get_location()
+            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
             all_labels = self.get_all_location_labels(location)
             screenshot = self.emulator.get_screenshot()
             screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
@@ -1152,6 +1171,21 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
             row = tool_input["row"]
             col = tool_input["col"]
             return self.talk_to_npc(col, row, tool_id, False)
+        elif tool_name == "log_npc_name_and_dialogue":
+            row = tool_input["row"]
+            col = tool_input["col"]
+            name = tool_input["name"]
+            dialogue = tool_input["dialogue"]
+            location = self.emulator.get_location()
+            self.text_display.add_message(f"Logging {location},  ({col}, {row}) as {name}")
+            self.label_archive.setdefault(location.lower(), {}).setdefault(row, {})[col] = name + ": [LOGGED BY TOOL] " + dialogue
+            return {
+                "type": "tool_result",
+                "tool_use_id": tool_id,
+                "content": [
+                    {"type": "text", "text": f"NPC logged: {location}, ({col}, {row}) as {name}: {dialogue}"}
+                ],
+            }
         else:
             logger.error(f"Unknown tool called: {tool_name}")
             return {
@@ -1657,7 +1691,8 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                             # parsed_result = json.loads(self.openai_message_history[-1]["output"])
                             # Apparently openai can get confused without a fresh update.
                             #if parsed_result[0]["text"].startswith("Pressed buttons") or parsed_result[0]["text"].startswith("Navigation"):
-                            memory_info, location, coords = self.emulator.get_state_from_memory()
+                            location = self.emulator.get_location()
+                            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
                             all_labels = self.get_all_location_labels(location)
                             screenshot = self.emulator.get_screenshot()
                             screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
@@ -1907,10 +1942,11 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 if self.steps_since_checkpoint > 50 and not self.location_tracker_activated:
                     self.location_tracker_activated = True
                     self.location_tracker = {}
-                _, location, _ = self.emulator.get_state_from_memory()
+                location = self.emulator.get_location()
                 if self.last_location != location:
                     if self.last_coords is not None and not self.emulator.get_in_combat() and self.last_location is not None:
                         self.label_archive.setdefault(self.last_location, {}).setdefault(self.last_coords[1], {})[self.last_coords[0]] = f"Entrance to {location} (Approximate)"
+                        self.label_archive.setdefault(location, {}).setdefault(coords[1], {})[coords[0]] = f"Entrance from {self.last_location} (Approximate)"
                     self.steps_since_location_shift = 0
                     self.steps_since_label_reset = 0
                     # The navigator turns OFF the moment the location changes. Note: if there is a sub_agent running, we are never in navigator_mode
@@ -1972,7 +2008,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
     def navigation_assistance(self, navigation_goal: str) -> str:
         logger.info(f"[Agent] Running Navigation Assist...")
         
-        _, location, coords = self.emulator.get_state_from_memory()
+        location = self.emulator.get_location()
 
         collision_map = self.update_and_get_full_collision_map()
 
@@ -2033,7 +2069,8 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
             messages = []
 
         if include_screenshot:
-            _, location, coords = self.emulator.get_state_from_memory()
+            location = self.emulator.get_location()
+            coords = self.emulator.get_coordinates()
             screenshot = self.emulator.get_screenshot()
             screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
 
@@ -2123,7 +2160,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     max_output_tokens=None,
                     temperature=TEMPERATURE,
                     system_instruction=instructions,
-                    tools=GOOGLE_MODIFIED_TOOLS
+                    tools=GOOGLE_TOOLS
                 )
             chat = self.gemini_client.chats.create(
                 model=GEMINI_MODEL_NAME,
@@ -2184,7 +2221,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 instructions=instructions,
                 max_output_tokens=MAX_TOKENS_OPENAI,
                 temperature=TEMPERATURE,
-                tools=OPENAI_MODIFIED_TOOLS
+                tools=OPENAI_TOOLS
             )
             # Gather Reasoning and tool calls
             response_texts = ""
@@ -2201,7 +2238,8 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
     def agentic_summary(self):
         self.text_display.add_message(f"[Agent] Generating Facts Analysis, standby...")
 
-        memory_info, location, coords = self.emulator.get_state_from_memory()
+        location = self.emulator.get_location()
+        memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
         try:
             previous_summary = self.message_history[0]["content"][0]["text"]
         except TypeError:

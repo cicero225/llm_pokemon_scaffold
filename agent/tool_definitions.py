@@ -71,9 +71,39 @@ TALK_TO_NPC_SCHEMA = {
         },
     }
 
+LOG_NPC_SCHEMA = {
+        "name": "log_npc_name_and_dialogue",
+        "description": "Log who a NPC is at a given location (approximate), along with what they say (which is usually fixed).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "row": {
+                    "type": "integer",
+                    "description": "The row coordinate of the NPC."
+                },
+                "col": {
+                    "type": "integer",
+                    "description": "The column coordinate of NPC."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Name of the NPC"
+                    
+                },
+                "dialogue": {
+                    "type": "string",
+                    "description": "The NPC's dialogue"
+                    
+                }
+            },
+            "required": ["row", "col", "name", "dialogue"],
+        },
+    }
+
 AVAILABLE_TOOLS = [
     PRESS_BUTTON_RESTRICTED_SCHEMA,
-    TALK_TO_NPC_SCHEMA
+    TALK_TO_NPC_SCHEMA,
+    LOG_NPC_SCHEMA
 ]
 
 AVAILABLE_TOOLS.append({

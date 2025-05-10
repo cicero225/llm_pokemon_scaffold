@@ -11,7 +11,7 @@ import threading, queue
 from agent.memory_reader import PokemonRedReader, StatusCondition
 from PIL import Image
 from pyboy import PyBoy
-from typing import Optional
+from typing import Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -658,9 +658,11 @@ class Emulator:
         full_map = self.pyboy.game_wrapper.game_area()
         return self._get_direction(full_map)
 
-    def get_state_from_memory(self, get_nearby_warps: bool=True) -> tuple[str, str, tuple[int, int]]:
+    def get_state_from_memory(self, get_nearby_warps: bool=True, display_warp_functor: Optional[Callable[[int, int], bool]] = None) -> tuple[str, str, tuple[int, int]]:
         """
         Reads the game state from memory and returns a string representation of it.
+
+        # display_warp_functor is a function that, given a warp coordinate, returns whether it should be showed to the model.
         """
         reader = PokemonRedReader(self.pyboy.memory)
         memory_str = ""
@@ -693,9 +695,12 @@ class Emulator:
             all_warps = reader.get_warps()
             nearby_warps = []
             for entry in all_warps:
-                if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
+                if display_warp_functor is not None:
+                    if display_warp_functor(entry[0], entry[1]):
+                        nearby_warps.append(entry)
+                elif (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
                     nearby_warps.append(entry)
-            memory_str += f"Nearby Warps (Doors, stairs, etc.): {nearby_warps}\n"
+            memory_str += f"Warps (Doors, stairs, etc.) in revealed text map: {nearby_warps}\n"
         memory_str += f"Badges: {', '.join(reader.read_badges())}\n"
 
         # Inventory
