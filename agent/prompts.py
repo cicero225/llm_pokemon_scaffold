@@ -43,8 +43,8 @@ PRIORITY: Some exits are at the edge of the map or area! Theese can be detected 
 Sometimes, these will have tile coordinates of either row 0 or column 0. Do not miss these!
 
 Your job is to explore the area thoroughly using a DEPTH FIRST SEARCH approach. Both your text_based map and screenshot will inform you
-which areas you have already explored. Use these to guide your DEPTH FIRST SEARCH and avoid explored areas. Try to reach areas labeled "Check Here"
-if possible, as they are completely uncharted!
+which areas you have already explored. Use these to guide your DEPTH FIRST SEARCH and avoid explored areas. Try to reach areas labeled "CHECK HERE TO EXPLORE"
+using your navigate_to_coordinate tool!
 
 Carefully check if you are in a dialog menu. If you are, take the appropriate steps to exit it before navigating.
 
@@ -355,6 +355,7 @@ More specifically, you will handle the following:
     3b. "log_npc_name_and_dialogue" will log a npc's identity and dialogue, and should be called after talking to a NPC.
     3c. "detailed_navigator" will hand over control temporarily to an agent instructed to perform a depth-first search to help you navigate mazes.
     3d. In mazes and other challenging areas, it is important to use bookmark_location_or_overwrite_label to label dead-ends (with no warps) to avoid revisiting the same spots. This is VERY IMPORTANT.
+    3e. Pay attention to text map tiles labeled "CHECK HERE TO EXPLORE". These are good places to go to make progress!
 4. Delegation: it will be necessary to call use_subagent to perform certain in-game tasks.
     4a. Here are the valid tasks subagents are allowed to do:
         * Talk to NPCs and record their dialogue
@@ -412,7 +413,7 @@ Navigation (and vision):
     3a. There is no need to go step by step to a distant location
     3b. Navigation may fail if it runs into an impassable obstacle or roaming NPC. Simply try again.
 5. Remember to check "Labeled nearby location" for location coordinates.
-6. Exploring unvisited tiles is a TOP priority. Make sure to take the time to check unvisited tiles, etc.
+6. Exploring unvisited tiles is a TOP priority. Make sure to take the time to tiles labeld "CHECK HERE TO EXPLORE"
 7. If stuck in an area on the overworld for too long (for instance over 300 steps), use the detailed_navigator too to try to help you explore.
 
 Delegation

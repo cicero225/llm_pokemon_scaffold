@@ -70,6 +70,7 @@ class LocationCollisionMap:
                 else:
                     self.internal_map[col][row] = initial_collision_map[row][col]
         self.distances: dict[tuple[int, int], int] = {}
+        self.adjacent_to_unexplored_or_edge: set[tuple[int, int]] = set()
 
     def update_map(self, collision_map: np.ndarray, sprite_locations: set[tuple[tuple[int, int], int]], coords: tuple[int, int], nearby_warps: Optional[list[tuple[int, int]]]=None):
         # Remove the previous player marker. Most convenient to do it right now.
@@ -117,14 +118,15 @@ class LocationCollisionMap:
                         self.internal_map[col + local_col_offset][row + local_row_offset] = 2
                 else:
                     self.internal_map[col + local_col_offset][row + local_row_offset] = collision_map[row][col]
-        self.distances = self.compute_effective_distance_to_tiles()
+        self.distances, self.adjacent_to_unexplored_or_edge = self.compute_effective_distance_to_tiles()
 
-    def compute_effective_distance_to_tiles(self) -> dict[tuple[int, int], int]:
+    def compute_effective_distance_to_tiles(self) -> tuple[dict[tuple[int, int], int], set[tuple[int, int]]]:
         # Basically do a distance fill
         depth = 99
         visited_tiles = set([self.player_coords])
         cur_tiles = set([self.player_coords])
         distances: dict[tuple[int, int], int] = {}
+        adjacent_to_unexplored_or_edge: set[tuple[int, int]] = set()
         for d in range(depth):
             new_tiles: set[tuple[int, int]] = set()
             for tile in cur_tiles:
@@ -133,7 +135,10 @@ class LocationCollisionMap:
                     shifted_col = candidate[0] - self.col_offset
                     shifted_row = candidate[1] - self.row_offset
                     if shifted_col < 0 or shifted_row < 0 or shifted_col > self.internal_map.shape[0] - 1 or shifted_row > self.internal_map.shape[1] - 1:
+                        adjacent_to_unexplored_or_edge.add(tile)
                         continue
+                    if self.internal_map[shifted_col][shifted_row] == -1:
+                        adjacent_to_unexplored_or_edge.add(tile)
                     if candidate in visited_tiles:
                         continue
                     if self.internal_map[shifted_col][shifted_row] == 1:   # the only passable scenario
@@ -141,7 +146,7 @@ class LocationCollisionMap:
                         distances[candidate] = d + 1
                     visited_tiles.add(candidate)
             cur_tiles = new_tiles
-        return distances
+        return distances, adjacent_to_unexplored_or_edge
 
     def generate_buttons_to_coord(self, col: int, row: int) -> Optional[list[str]]:
         starting_distance = self.distances.get((col, row))
@@ -199,7 +204,7 @@ class LocationCollisionMap:
         horizontal_labels = list(range(self.col_offset, self.col_offset+self.internal_map.shape[0]))
 
         
-        row_width = 45
+        row_width = 65
         horizontal_border = "       +" + "".join("Column " + str(x) + " "*(row_width - len(str(x)) - 7) for x in horizontal_labels) + "+"
         horizontal_border_human = "       +" + "".join(str(x) + " "*(4-len(str(x))) for x in horizontal_labels) + "+"
 
@@ -212,14 +217,15 @@ class LocationCollisionMap:
                     "",
                     "Legend:",
                     "██ - Wall/Obstacle",
-                    "·· - CHECK HERE: Path/Walkable",
+                    "·· - Path/Walkable",
                     "SS - Sprite",
                     "PP - Player Character",
                     "II - Item"
                     "xx - AVOID GOING HERE - Already Explored",
-                    "uu - CHECK HERE: Blank = Unknown/Unvisited",
+                    "uu - Blank = Unknown/Unvisited",
                     "ww - Warp",
                     "Numbers - How many tiles away this tile is to reach."
+                    "cc - CHECK HERE - next to Unexplored."
                 ]
             )
         else:
@@ -232,8 +238,9 @@ class LocationCollisionMap:
                     "SS - Sprite",
                     "PP - Player Character",
                     "II - Item",
-                    "ww - Warp",
-                    "uu - Blank = Unknown/Unvisited"
+                    "xx - AVOID GOING HERE - Already Explored",
+                    "uu - Blank = Unknown/Unvisited",
+                    "cc - CHECK HERE - next to Unexplored."
                 ]
             )
 
@@ -249,7 +256,7 @@ class LocationCollisionMap:
                 # for the case that we can't log both a player character and warp or sprite in the same spot.
                 # Because of this, we now have an edge case if the player character is on a warp, or a sprite is.
                 if col == -1:
-                    row += self.make_ascii_segment("Check here", row_width, real_col, real_row)
+                    row += self.make_ascii_segment("Unexplored", row_width, real_col, real_row)
                     row_human += " uu "
                 elif col == 0:
                     row += self.make_ascii_segment("Impassable", row_width, real_col, real_row)
@@ -268,6 +275,9 @@ class LocationCollisionMap:
                             row_human += " xx "
                     else:
                         row_piece += "Passable"
+                        if (real_col, real_row) in self.adjacent_to_unexplored_or_edge:
+                            row_piece += " CHECK HERE TO EXPLORE "
+                            row_piece_human = " cc "
                         if not row_piece_human:
                             row_human += " ·· "
                     row += self.make_ascii_segment(row_piece, row_width, real_col, real_row)
@@ -811,9 +821,9 @@ class SimpleAgent:
                             },
                         },
                         {"type": "text", "text": f"\nGame state information from memory after your action:\n{memory_info}"},
-                        {"type": "text", "text": f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}"},
-                        {"type": "text", "text": f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}"}
+                        {"type": "text", "text": f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}"}
                     ]
+                content.append({"type": "text", "text": f"\nHere are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}"})
                 if not self.emulator.get_in_combat() and include_text_map:
                     content.append({"type": "text", "text": "Here is a map of this RAM location compiled so far:\n\n[TEXT_MAP]" + self.update_and_get_full_collision_map() + "\n\n[/TEXT_MAP]"})
                 return {
@@ -835,6 +845,8 @@ class SimpleAgent:
                         {"type": "text", "text": f"Here are your last 10 checkpoints:\n{last_checkpoints}"},
                         {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                     ]
+                if location in self.full_collision_map:
+                    content.append({"type": "text", "text": f"\nCHECK HERE TO EXPLORE {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}"})
                 return {
                     "type": "tool_result",
                     "tool_use_id": tool_id,
@@ -862,6 +874,8 @@ class SimpleAgent:
                         {"type": "text", "text": f"Here are your last 10 checkpoints:\n{last_checkpoints}"},
                         {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                     ]
+                if location in self.full_collision_map:
+                    content.append({"type": "text", "text": f"\nCHECK HERE TO EXPLORE {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}"})
                 if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
                     content.append({"type": "text", "text": "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."})
                 if not self.emulator.get_in_combat() and self.use_full_collision_map and include_text_map:
@@ -985,6 +999,8 @@ class SimpleAgent:
                             {"type": "text", "text": f"Here are your last 10 checkpoints:\n{last_checkpoints}"},
                             {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                         ]
+                    if location in self.full_collision_map:
+                        content.append({"type": "text", "text": f"\nCHECK HERE TO EXPLORE {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}"})
                     return {
                         "type": "tool_result",
                         "tool_use_id": tool_id,
@@ -1011,6 +1027,8 @@ class SimpleAgent:
                             {"type": "text", "text": f"Here are your last 10 checkpoints:\n{last_checkpoints}"},
                             {"type": "text", "text": f"You have been in this location for {self.steps_since_location_shift} steps"}
                         ]
+                    if location in self.full_collision_map:
+                        content.append({"type": "text", "text": f"\nCHECK HERE TO EXPLORE {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}"})
                     if not self.emulator.get_in_combat() and self.use_full_collision_map:
                         content.append({"type": "text", "text": "Here is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map()})
                     if self.emulator.get_in_combat():  # Only possible if navigator mode has been running.
@@ -1702,9 +1720,10 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                                         "type": "input_text",
                                         "text": (f"\nGame state information from memory after your action:\n{memory_info}"
                                                 f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}" +
-                                                f"Here are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}" +
-                                                f"Here are your last 10 checkpoints:\n{last_checkpoints}" +
-                                                f"You have been in this location for {self.steps_since_location_shift} steps"),
+                                                f"\nHere are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}" +
+                                                f"\nHere are your last 10 checkpoints:\n{last_checkpoints}" +
+                                                f"\nYou have been in this location for {self.steps_since_location_shift} steps") +
+                                                f"\nCHECK HERE TO EXPLORE {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}",
                                                 
                                     },
                                     {
@@ -2268,8 +2287,10 @@ RAM Information: {memory_info}
 
 Steps Since last Location Shift: {self.steps_since_location_shift}
 
-text_based MAP: {collision_map}
+Text_based MAP: {collision_map}
 
+Locations potentially worth exploring based on on map {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}
+                            
 Last 10 Checkpoints: {last_checkpoints}
 
 Labeled nearby locations: {','.join(f'{coords}: {label}' for coords, label in all_labels)}
