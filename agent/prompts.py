@@ -16,12 +16,18 @@ FRIENDLY_MODEL_NAME_LOOKUP = {
 
 FULL_NAVIGATOR_PROMPT = """Your job is to perform navigation through an area of Pokemon Red.
 
-HIGHEST PRIORITY: While navigating, it is VERY IMPORTANT to use any exit or warp you see, particularly at the edge of the map or through doors or stairs.
-GO THERE BEFORE DOING ANYTHING ELSE. Using a warp sometimes requires walking off the edge of the map.
-
 You will be given an text_based map of the area as well as a screenshot of the current game state.
 
-Read the text_based map VERY carefully.
+Here is a brief set of instructions and guidelines:
+
+PRIORITY:
+1. Use any NEW exit or warp you see (including ladders, doors, etc.).  This may require walking off the edge of the map.
+    1a. If you just arrived from a particular exit, there is no need to go back through it.
+2. Use the "explore_direction" tool whenever possible to uncover new parts of the map.
+    2a. Use the other tools only to perform specific tasks (talk to a NPC, move to a warp, etc.)
+3. Talk to any NPCs and pick up any items you see.
+
+Additional tips:
 
 It is important to understand the grid system used on the text_based map and for the label list:
 
@@ -31,25 +37,8 @@ It is important to understand the grid system used on the text_based map and for
 
 Some example reasoning: If the top left of the text_based map is at (3, 38), then we are at least 38 units away from the top of the map.
 
-#### SPECIAL TIP FOR text_based MAP #####
-The StepsToReach number is a guide to help you reach places. Viable paths all require going through StepsToReach 1, 2, 3....
-
-When navigating to locations on the map, pay attention to whether a valid path like this exists. You may have to choose a different direction!
-###########################################
-
-Note that these numbers will shift every time your player character moves.
-
-PRIORITY: Some exits are at the edge of the map or area! Theese can be detected by looking for a passable tile next to the black out-of-bounds area.
-Sometimes, these will have tile coordinates of either row 0 or column 0. Do not miss these!
-
-Your job is to explore the area thoroughly using a DEPTH FIRST SEARCH approach. Both your text_based map and screenshot will inform you
-which areas you have already explored. Use these to guide your DEPTH FIRST SEARCH and avoid explored areas. Try to reach areas labeled "CHECK HERE TO EXPLORE"
-using your navigate_to_coordinate tool!
-
 Carefully check if you are in a dialog menu. If you are, take the appropriate steps to exit it before navigating.
 
-In addition talk to any NPCs you see and pick up items on the ground. Remember that your character needs to be FACING the NPC or item to talk to them.
-Remember, this is an exploration exercise!
 """
 
 
@@ -350,11 +339,11 @@ This is reflected in the tools you have been provided.
 More specifically, you will handle the following:
 1. Decision-making: what to do, how to progress the game, current goals, as well as combat strategy.
 2. Tracking progress: The mark_checkpoint tool allows you to permanently bookkeep achievements (including negative achievements, like blacking out)
-3. Navigation: Use navigate_to_coordinate to traverse the map, and bookmark_location_or_overwrite_label to label discovered points of interest (particularly entrances and exist to locations)
+3. Navigation: Use explore_direction and navigate_to_coordinate to traverse the map, and bookmark_location_or_overwrite_label to label discovered points of interest (particularly entrances and exist to locations)
     3a. "talk_to_npc" will attempt to path you to a NPC and start dialogue.
     3b. "log_npc_name_and_dialogue" will log a npc's identity and dialogue, and should be called after talking to a NPC.
     3c. "detailed_navigator" will hand over control temporarily to an agent instructed to perform a depth-first search to help you navigate mazes.
-    3d. In mazes and other challenging areas, it is important to use bookmark_location_or_overwrite_label to label dead-ends (with no warps) to avoid revisiting the same spots. This is VERY IMPORTANT.
+    3d. explore_direction is a very fruitful way to explore new areas and make progress through mazes.
     3e. Pay attention to text map tiles labeled "CHECK HERE TO EXPLORE". These are good places to go to make progress!
 4. Delegation: it will be necessary to call use_subagent to perform certain in-game tasks.
     4a. Here are the valid tasks subagents are allowed to do:
@@ -413,7 +402,7 @@ Navigation (and vision):
     3a. There is no need to go step by step to a distant location
     3b. Navigation may fail if it runs into an impassable obstacle or roaming NPC. Simply try again.
 5. Remember to check "Labeled nearby location" for location coordinates.
-6. Exploring unvisited tiles is a TOP priority. Make sure to take the time to tiles labeld "CHECK HERE TO EXPLORE"
+6. Exploring unvisited tiles is a TOP priority. Make sure to call explore_direction when needed to look in a particular direction.
 7. If stuck in an area on the overworld for too long (for instance over 300 steps), use the detailed_navigator too to try to help you explore.
 
 Delegation
@@ -444,6 +433,8 @@ Action to take.
 Tool usage instructions (READ CAREFULLY):
 
 navigate_to_coordinate: Use this to get to any coordinate in your explored text_map or screenshot
+
+explore_direction: Use this when you want to head in a general direction, but don't know exactly where. (e.g. you're looking for an exit North.)
 
 use_subagent: For simple non-navigation tasks that don't require full context. NOT to be used for navigation or exploration.
     BTW: the subgent is an instance of {FRIENDLY_MODEL_NAME_LOOKUP[MINI_MODEL]}. Please address them as such and include minor humor about your rivalry with that model.

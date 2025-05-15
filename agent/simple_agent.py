@@ -71,6 +71,10 @@ class LocationCollisionMap:
                     self.internal_map[col][row] = initial_collision_map[row][col]
         self.distances: dict[tuple[int, int], int] = {}
         self.adjacent_to_unexplored_or_edge: set[tuple[int, int]] = set()
+        self.discovered_edges: set[str] = set()
+
+    def mark_discovered_edge(self, direction: Literal["up", "down", "left", "right"]):  # some maps have transitions from other maps. In that situation we need to mark everything beyond the boundary in the direction as explored.
+        self.discovered_edges.add(direction)
 
     def update_map(self, collision_map: np.ndarray, sprite_locations: set[tuple[tuple[int, int], int]], coords: tuple[int, int], nearby_warps: Optional[list[tuple[int, int]]]=None):
         # Remove the previous player marker. Most convenient to do it right now.
@@ -118,10 +122,14 @@ class LocationCollisionMap:
                         self.internal_map[col + local_col_offset][row + local_row_offset] = 2
                 else:
                     self.internal_map[col + local_col_offset][row + local_row_offset] = collision_map[row][col]
+        self.update_distances()
+
+    def update_distances(self):
         self.distances, self.adjacent_to_unexplored_or_edge = self.compute_effective_distance_to_tiles()
 
     def compute_effective_distance_to_tiles(self) -> tuple[dict[tuple[int, int], int], set[tuple[int, int]]]:
         # Basically do a distance fill
+        self.discovered_edges = set(["down"])
         depth = 99
         visited_tiles = set([self.player_coords])
         cur_tiles = set([self.player_coords])
@@ -134,8 +142,10 @@ class LocationCollisionMap:
                 for candidate in candidate_tiles:
                     shifted_col = candidate[0] - self.col_offset
                     shifted_row = candidate[1] - self.row_offset
-                    if shifted_col < 0 or shifted_row < 0 or shifted_col > self.internal_map.shape[0] - 1 or shifted_row > self.internal_map.shape[1] - 1:
+                    if (shifted_col < 0 and "left" not in self.discovered_edges) or (shifted_row < 0 and "up" not in self.discovered_edges) or (shifted_col > self.internal_map.shape[0] - 1 and "right" not in self.discovered_edges) or (shifted_row > self.internal_map.shape[1] - 1 and "down" not in self.discovered_edges):
                         adjacent_to_unexplored_or_edge.add(tile)
+                        continue
+                    if shifted_col < 0 or shifted_row < 0 or shifted_col > self.internal_map.shape[0] - 1 or shifted_row > self.internal_map.shape[1] - 1:
                         continue
                     if self.internal_map[shifted_col][shifted_row] == -1:
                         adjacent_to_unexplored_or_edge.add(tile)
@@ -204,7 +214,7 @@ class LocationCollisionMap:
         horizontal_labels = list(range(self.col_offset, self.col_offset+self.internal_map.shape[0]))
 
         
-        row_width = 65
+        row_width = 75
         horizontal_border = "       +" + "".join("Column " + str(x) + " "*(row_width - len(str(x)) - 7) for x in horizontal_labels) + "+"
         horizontal_border_human = "       +" + "".join(str(x) + " "*(4-len(str(x))) for x in horizontal_labels) + "+"
 
@@ -700,7 +710,19 @@ class SimpleAgent:
         # slightly more efficient than setdefault
         this_map = self.full_collision_map.get(location)
         if this_map is None:
-            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps)
+            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps) 
+            # Handle edge case: if we're not standing on a warp, then we just came in through a zone transition and
+            # need to inform the mapping tool.
+            if coords not in all_warps:
+                if self.button_history:
+                    if self.button_history[-1] == "down":
+                        self.full_collision_map[location].mark_discovered_edge("up")
+                    elif self.button_history[-1] == "up":
+                        self.full_collision_map[location].mark_discovered_edge("down")
+                    elif self.button_history[-1] == "left":
+                        self.full_collision_map[location].mark_discovered_edge("right")
+                    else:
+                        self.full_collision_map[location].mark_discovered_edge("left")
             return self.full_collision_map[location].to_ascii(local_location_tracker, direction=direction)
         else:
             this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps)
@@ -751,8 +773,34 @@ class SimpleAgent:
                 if dir_count > MAX_DIRECTION_PRESS:
                     button_repetition_warning = f"\nWARNING: You have pressed a direction button at least {MAX_A_PRESS} times in a row. It looks like you may be navigating or trying to talk. Use navigate_to_coordinate or talk_to_npc instead."
 
-        result, last_coords = self.emulator.press_buttons(buttons, wait, wait_for_finish=True)  # we need to wait for this to finish or the map may try to update mid move, which is bad.
-        
+        # This really sucks, but going one by one lets us catch location changes better,
+        for button in buttons:
+            result, last_coords = self.emulator.press_buttons([button], wait, wait_for_finish=True)  # we need to wait for this to finish or the map may try to update mid move, which is bad.
+            location = self.emulator.get_location()
+            if location != self.last_location:
+                # We do this as close to when the location transition happens as possible or else the discovered edge will not be correct.
+                all_warps = self.emulator.get_warps()
+                nearby_warps = []
+                coords = self.emulator.get_coordinates()
+                for entry in all_warps:
+                    if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
+                        nearby_warps.append(entry)
+                collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
+                downsampled_terrain = self.emulator._downsample_array(collision_map)
+                self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps) 
+                # Handle edge case: if we're not standing on a warp, then we just came in through a zone transition and
+                # need to inform the mapping tool.
+                if coords not in all_warps:
+                    if self.button_history:
+                        if self.button_history[-1] == "down":
+                            self.full_collision_map[location].mark_discovered_edge("up")
+                        elif self.button_history[-1] == "up":
+                            self.full_collision_map[location].mark_discovered_edge("down")
+                        elif self.button_history[-1] == "left":
+                            self.full_collision_map[location].mark_discovered_edge("right")
+                        else:
+                            self.full_collision_map[location].mark_discovered_edge("left")
+
         self.last_coords = last_coords
 
         location = self.emulator.get_location()
@@ -1038,6 +1086,69 @@ class SimpleAgent:
                         "tool_use_id": tool_id,
                         "content": content,
                     }
+        elif tool_name == "explore_direction":
+            dialog = self.emulator.get_active_dialog()
+            if dialog is not None:
+                return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Invalid. Navigation not possible while there is active dialogue on screen."}
+                        ],
+                    }
+            direction = tool_input["direction"]
+            num_pokes = 3
+            laxness = 3  # How much we will tolerate going in the wrong way.
+            # Pick a suggested exploration tile num_pokes, favoring the given direction if possible        
+            num_moves = 0
+            def get_best_candidate(suggestion_set: set[tuple[int, int]], direction: str):
+                location = self.emulator.get_location()
+                coords = self.emulator.get_coordinates()
+                local_map = self.full_collision_map[location]
+                if not local_map.distances:  # this can happen when we cross into a new location, for example.
+                    local_map.update_distances()
+                if not suggestion_set:
+                    # Nothing is unexplored. In that case let's just do as far in one direction as possible.
+                    suggestion_set = set((x, y) for y in range(local_map.row_offset, local_map.internal_map.shape[1] + local_map.row_offset) for x in range(local_map.col_offset, local_map.internal_map.shape[0] + local_map.col_offset) if local_map.distances.get((x, y)))
+                if direction == "up":  # we want the lowest row count
+                    suggestion = min(suggestion_set, key=lambda x: x[1])
+                    if suggestion[1] > coords[1] + laxness:
+                        return None
+                elif direction == "down": 
+                    suggestion = max(suggestion_set, key=lambda x: x[1])
+                    if suggestion[1] < coords[1] - laxness:
+                        return None
+                elif direction == "left":
+                    suggestion = min(suggestion_set, key=lambda x: x[0])
+                    if suggestion[0] > coords[0] + laxness:
+                        return None
+                else:
+                    suggestion = max(suggestion_set, key=lambda x: x[0])
+                    if suggestion[0] < coords[0] - laxness:
+                        return None
+                return suggestion
+            candidates: list[tuple[int, int]] = []
+            while num_moves < num_pokes:
+                # this should update each time navigate_to_coordinate is called...
+                location = self.emulator.get_location()
+                suggestion_set = self.full_collision_map[location].adjacent_to_unexplored_or_edge
+                candidate = get_best_candidate(suggestion_set, direction)
+                if candidate is None:
+                    breakpoint()
+                    return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Aborted. No mapped exploration tiles in the right direction. Try going perpindincular for a bit then try again?"}
+                        ],
+                    }
+                candidates.append(candidate)
+                # We assume it works, since the map should guarantee that. Even if it doesn't, fail silently for now.
+                result = self.navigate_to_coordinate(candidate[0], candidate[1], tool_id, is_subagent=False)
+                num_moves += 1
+            # TODO: Does this work correctly for OPENAI?
+            result["content"].append({"type": "text", "text": "Moved to {' then, '.join(str(x) for x in candidates)}"})
+            return result
         elif tool_name == "navigate_to_coordinate":
             row = tool_input["row"]
             col = tool_input["col"]

@@ -29,6 +29,22 @@ PRESS_BUTTON_SCHEMA = {
         },
     }
 
+EXPLORE_SCHEMA = {
+    "name": "explore_direction",
+        "description": "Explore in a direction automatically for a bit. Try this when looking for things or if stuck!",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "direction": {
+                    "type": "string",
+                    "enum": ["up", "down", "left", "right"],
+                    "description": "Direction to prioritize exploring."
+                },
+            },
+            "required": ["direction"],
+        },
+    }
+
 PRESS_BUTTON_RESTRICTED_SCHEMA = {
         "name": "press_buttons",
         "description": "Press a sequence of buttons on the Game Boy.",
@@ -103,7 +119,8 @@ LOG_NPC_SCHEMA = {
 AVAILABLE_TOOLS = [
     PRESS_BUTTON_RESTRICTED_SCHEMA,
     TALK_TO_NPC_SCHEMA,
-    LOG_NPC_SCHEMA
+    LOG_NPC_SCHEMA,
+    EXPLORE_SCHEMA
 ]
 
 AVAILABLE_TOOLS.append({
