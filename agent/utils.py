@@ -23,6 +23,9 @@ def convert_anthropic_message_history_to_google_format(messages: list[dict[str, 
                     # gemini gets confused sometimes with too many text parts
                     all_text = []
                     for entry in content['content']:
+                        if isinstance(entry, str):
+                            all_text.append(entry)
+                            continue
                         if entry['type'] == "text":
                             all_text.append(entry["text"])
                         elif entry['type'] == "image":

@@ -142,7 +142,7 @@ class LocationCollisionMap:
                 for candidate in candidate_tiles:
                     shifted_col = candidate[0] - self.col_offset
                     shifted_row = candidate[1] - self.row_offset
-                    if (shifted_col < 0 and "left" not in self.discovered_edges) or (shifted_row < 0 and "up" not in self.discovered_edges) or (shifted_col > self.internal_map.shape[0] - 1 and "right" not in self.discovered_edges) or (shifted_row > self.internal_map.shape[1] - 1 and "down" not in self.discovered_edges):
+                    if (shifted_col < min(0, self.col_offset) and "left" not in self.discovered_edges) or (shifted_row < min(0, self.row_offset) and "up" not in self.discovered_edges) or (shifted_col > self.internal_map.shape[0] - 1 and "right" not in self.discovered_edges) or (shifted_row > self.internal_map.shape[1] - 1 and "down" not in self.discovered_edges):
                         adjacent_to_unexplored_or_edge.add(tile)
                         continue
                     if shifted_col < 0 or shifted_row < 0 or shifted_col > self.internal_map.shape[0] - 1 or shifted_row > self.internal_map.shape[1] - 1:
@@ -436,12 +436,11 @@ class SimpleAgent:
 
         past_locations = self.location_history
         location_labels = self.label_archive.get(location)
-        if location_labels is None:
-            # this sucks man
-            for key, value in self.label_archive.items():
-                if location.lower() == key.lower():
-                    location_labels = value
-                    break
+        # this sucks man
+        for key, value in self.label_archive.items():
+            if location.lower() == key.lower():
+                location_labels = ({} if location_labels is None else location_labels) | value
+                break
         if location_labels is None:
             location_labels = {}
         local_location_tracker = self.location_tracker.get(location, [])
@@ -731,12 +730,11 @@ class SimpleAgent:
     def get_all_location_labels(self, location: str) -> list[tuple[tuple[int, int], str]]:
         all_labels: list[tuple[tuple[int, int], str]] = []
         this_location = self.label_archive.get(location)
-        if this_location is None:
-            # this sucks man
-            for key, value in self.label_archive.items():
-                if location.lower() == key.lower():
-                    this_location = value
-                    break
+        # this sucks man
+        for key, value in self.label_archive.items():
+            if location.lower() == key.lower():
+                this_location = ({} if this_location is None else this_location) | value
+                break
         if this_location is not None and this_location:
             max_row = max(this_location.keys())
             for nearby_row in range(max_row + 1):
@@ -771,23 +769,24 @@ class SimpleAgent:
                     break
                 dir_count += 1
                 if dir_count > MAX_DIRECTION_PRESS:
-                    button_repetition_warning = f"\nWARNING: You have pressed a direction button at least {MAX_A_PRESS} times in a row. It looks like you may be navigating or trying to talk. Use navigate_to_coordinate or talk_to_npc instead."
+                    button_repetition_warning = f"\nWARNING: You have pressed a direction button at least {MAX_A_PRESS} times in a row. It looks like you may be navigating or trying to talk. Use navigate_to_coordinate or talk_to_npc_or_pick_up_item instead."
 
         # This really sucks, but going one by one lets us catch location changes better,
         for button in buttons:
             result, last_coords = self.emulator.press_buttons([button], wait, wait_for_finish=True)  # we need to wait for this to finish or the map may try to update mid move, which is bad.
             location = self.emulator.get_location()
-            if location != self.last_location:
-                # We do this as close to when the location transition happens as possible or else the discovered edge will not be correct.
-                all_warps = self.emulator.get_warps()
-                nearby_warps = []
+            if location != self.last_location :
                 coords = self.emulator.get_coordinates()
-                for entry in all_warps:
-                    if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
-                        nearby_warps.append(entry)
-                collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
-                downsampled_terrain = self.emulator._downsample_array(collision_map)
-                self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps) 
+                all_warps = self.emulator.get_warps()
+                if location not in self.full_collision_map:
+                    # We do this as close to when the location transition happens as possible or else the discovered edge will not be correct.
+                    nearby_warps = []
+                    for entry in all_warps:
+                        if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
+                            nearby_warps.append(entry)
+                    collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
+                    downsampled_terrain = self.emulator._downsample_array(collision_map)
+                    self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps) 
                 # Handle edge case: if we're not standing on a warp, then we just came in through a zone transition and
                 # need to inform the mapping tool.
                 if coords not in all_warps:
@@ -800,6 +799,7 @@ class SimpleAgent:
                             self.full_collision_map[location].mark_discovered_edge("right")
                         else:
                             self.full_collision_map[location].mark_discovered_edge("left")
+                self.last_location = location
 
         self.last_coords = last_coords
 
@@ -1128,26 +1128,37 @@ class SimpleAgent:
                         return None
                 return suggestion
             candidates: list[tuple[int, int]] = []
+            original_location = self.emulator.get_location()
+            result = None
             while num_moves < num_pokes:
                 # this should update each time navigate_to_coordinate is called...
                 location = self.emulator.get_location()
+                if location != original_location:
+                    result["content"].append({"type": "text", "text": f"Moved to {' then, '.join(str(x) for x in candidates)}"})
+                    result["content"].append({"type": "text", "text": f"Exploration terminated. New location reached."})
+                    return result
                 suggestion_set = self.full_collision_map[location].adjacent_to_unexplored_or_edge
                 candidate = get_best_candidate(suggestion_set, direction)
                 if candidate is None:
-                    breakpoint()
-                    return {
-                        "type": "tool_result",
-                        "tool_use_id": tool_id,
-                        "content": [
-                            {"type": "text", "text": f"Aborted. No mapped exploration tiles in the right direction. Try going perpindincular for a bit then try again?"}
-                        ],
-                    }
+                    if result is None:
+                        return {
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": [
+                                {"type": "text", "text": f"Aborted. No mapped exploration tiles in the right direction. Try going perpindincular for a bit then try again?"}
+                            ],
+                        }
+                    else:
+                        if candidates:
+                            result["content"].append({"type": "text", "text": f"Moved to {' then, '.join(str(x) for x in candidates)}"})
+                        result["content"].append({"type": "text", "text": f"Aborted. No mapped exploration tiles in the right direction. Try going perpindincular for a bit then try again?"})
+                        return result
                 candidates.append(candidate)
                 # We assume it works, since the map should guarantee that. Even if it doesn't, fail silently for now.
                 result = self.navigate_to_coordinate(candidate[0], candidate[1], tool_id, is_subagent=False)
                 num_moves += 1
             # TODO: Does this work correctly for OPENAI?
-            result["content"].append({"type": "text", "text": "Moved to {' then, '.join(str(x) for x in candidates)}"})
+            result["content"].append({"type": "text", "text": f"Moved to {' then, '.join(str(x) for x in candidates)}"})
             return result
         elif tool_name == "navigate_to_coordinate":
             row = tool_input["row"]
@@ -1240,7 +1251,7 @@ Otherwise the Senior Agent will be forced to make another call just to close the
 
 DEVELOPER TIP: The Senior Agent is an imperfect model and you may know better sometimes! Not always, but here's a free hint:
 Counterintuitively: Nurse Joy and shopkeepers have to be talked to _through_ a counter--that is, facing an impassable tile in front of them.
-Look for someone who is boxed in and can't move, and try "talk_to_npc" on their coordinates.
+Look for someone who is boxed in and can't move, and try "talk_to_npc_or_pick_up_item" on their coordinates.
 
 Additional Instructions:
 
@@ -1296,10 +1307,10 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
                 "content": [
                 ],
             }
-        elif tool_name == "talk_to_npc":
+        elif tool_name == "talk_to_npc_or_pick_up_item":
             row = tool_input["row"]
             col = tool_input["col"]
-            return self.talk_to_npc(col, row, tool_id, False)
+            return self.talk_to_npc_or_pick_up_item(col, row, tool_id, False)
         elif tool_name == "log_npc_name_and_dialogue":
             row = tool_input["row"]
             col = tool_input["col"]
@@ -1327,7 +1338,7 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
     
     # TODO: This section is due for a refactor, since these tools are shared by subagents, but now awkwardly use this logic.
     # Heck, this one is _only_ used by the subagent.
-    def talk_to_npc(self, col: int, row: int, tool_id, is_subagent: bool=False) -> dict[str, Any]:
+    def talk_to_npc_or_pick_up_item(self, col: int, row: int, tool_id, is_subagent: bool=False) -> dict[str, Any]:
         dialog = self.emulator.get_active_dialog()
         if dialog is not None:
             return {
@@ -1377,13 +1388,18 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
         two_tile_warning = ""
         # Search for reachable tiles within 1 tile of the NPC:
         for walk_col, walk_row in [(goal_col - 1, goal_row), (goal_col + 1, goal_row), (goal_col, goal_row - 1), (goal_col, goal_row + 1)]:
-                valid_pathing = self.full_collision_map[location].distances.get((walk_col, walk_row))
-                if valid_pathing is not None:
-                    break
+            # It might be where the cplayer is already standing! That's okay!
+            if (walk_col, walk_row) == player_coords:
+                break
+            valid_pathing = self.full_collision_map[location].distances.get((walk_col, walk_row))
+            if valid_pathing is not None:
+                break
         else:
             two_tile_warning = "\nWarning: Space next to NPC not found; Going two-tiles away instead to try to talk instead. Maybe this is Nurse Joy or the shopkeeper?"
             # Now try 2 tiles away. This is specifically for the likes of nurse joy and the shopping ladies.
             for walk_col, walk_row in [(goal_col - 2, goal_row), (goal_col + 2, goal_row), (goal_col, goal_row - 2), (goal_col, goal_row + 2)]:
+                if (walk_col, walk_row) == player_coords:
+                    break
                 valid_pathing = self.full_collision_map[location].distances.get((walk_col, walk_row))
                 if valid_pathing is not None:
                     break
@@ -1396,11 +1412,14 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
                     ],
                 }
 
-        # Might as well get walking
-        navigation_result = self.navigate_to_coordinate(walk_col, walk_row, tool_id, is_subagent=is_subagent)
-        # extract result string
-        navigation_result_content = navigation_result["content"]
-        navigation_result_line = navigation_result_content[0]  # We drop everything but the first line to avoid repetitive screenshots etc.
+        if (walk_col, walk_row) == player_coords:
+            navigation_result_line = {"type": "text", "text": f"No movement needed; Player is already standing in a valid position to talk to NPC."}
+        else:
+            # Might as well get walking
+            navigation_result = self.navigate_to_coordinate(walk_col, walk_row, tool_id, is_subagent=is_subagent)
+            # extract result string
+            navigation_result_content = navigation_result["content"]
+            navigation_result_line = navigation_result_content[0]  # We drop everything but the first line to avoid repetitive screenshots etc.
 
         # Now face the NPC. We exploit the fact that if they're really there (or we can't reach the tile next to them), we can freely press the button and just expect to be blocked.
         # if we're _not_ blocked, then the NPC must have moved.
@@ -2073,10 +2092,11 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     self.location_tracker_activated = True
                     self.location_tracker = {}
                 location = self.emulator.get_location()
+                new_coords = self.emulator.get_coordinates()
                 if self.last_location != location:
                     if self.last_coords is not None and not self.emulator.get_in_combat() and self.last_location is not None:
                         self.label_archive.setdefault(self.last_location, {}).setdefault(self.last_coords[1], {})[self.last_coords[0]] = f"Entrance to {location} (Approximate)"
-                        self.label_archive.setdefault(location, {}).setdefault(coords[1], {})[coords[0]] = f"Entrance from {self.last_location} (Approximate)"
+                        self.label_archive.setdefault(location, {}).setdefault(new_coords[1], {})[new_coords[0]] = f"Entrance from {self.last_location} (Approximate)"
                     self.steps_since_location_shift = 0
                     self.steps_since_label_reset = 0
                     # The navigator turns OFF the moment the location changes. Note: if there is a sub_agent running, we are never in navigator_mode
@@ -2143,12 +2163,11 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
         collision_map = self.update_and_get_full_collision_map()
 
         this_location = self.label_archive.get(location)
-        if this_location is None:
-            # this sucks man
-            for key, value in self.label_archive.items():
-                if location.lower() == key.lower():
-                    this_location = value
-                    break
+        # this sucks man
+        for key, value in self.label_archive.items():
+            if location.lower() == key.lower():
+                this_location = ({} if this_location is None else this_location) | value
+                break
 
         labels = "No Labels yet."
         all_labels = []

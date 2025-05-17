@@ -340,7 +340,7 @@ More specifically, you will handle the following:
 1. Decision-making: what to do, how to progress the game, current goals, as well as combat strategy.
 2. Tracking progress: The mark_checkpoint tool allows you to permanently bookkeep achievements (including negative achievements, like blacking out)
 3. Navigation: Use explore_direction and navigate_to_coordinate to traverse the map, and bookmark_location_or_overwrite_label to label discovered points of interest (particularly entrances and exist to locations)
-    3a. "talk_to_npc" will attempt to path you to a NPC and start dialogue.
+    3a. "talk_to_npc_or_pick_up_item" will attempt to path you to a NPC and start dialogue. It can also be used to pick up items!
     3b. "log_npc_name_and_dialogue" will log a npc's identity and dialogue, and should be called after talking to a NPC.
     3c. "detailed_navigator" will hand over control temporarily to an agent instructed to perform a depth-first search to help you navigate mazes.
     3d. explore_direction is a very fruitful way to explore new areas and make progress through mazes.
@@ -435,6 +435,8 @@ Tool usage instructions (READ CAREFULLY):
 navigate_to_coordinate: Use this to get to any coordinate in your explored text_map or screenshot
 
 explore_direction: Use this when you want to head in a general direction, but don't know exactly where. (e.g. you're looking for an exit North.)
+
+talk_to_npc_or_pick_up_item: Can be used to try to talk to npcs at or near a coordinate (provide exact coordinates when possible). Will also pick up items!
 
 use_subagent: For simple non-navigation tasks that don't require full context. NOT to be used for navigation or exploration.
     BTW: the subgent is an instance of {FRIENDLY_MODEL_NAME_LOOKUP[MINI_MODEL]}. Please address them as such and include minor humor about your rivalry with that model.
