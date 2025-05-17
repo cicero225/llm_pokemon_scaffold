@@ -69,7 +69,7 @@ PRESS_BUTTON_RESTRICTED_SCHEMA = {
     }
 
 TALK_TO_NPC_SCHEMA = {
-        "name": "talk_to_npc",
+        "name": "talk_to_npc_or_pick_up_item",
         "description": "Begine talking to a NPC or pick up an item at the coordinates. If the tile is empty, will try to find one within one tile of the given coordinates instead. Will abort if more than one found.",
         "input_schema": {
             "type": "object",

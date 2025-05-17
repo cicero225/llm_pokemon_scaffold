@@ -5,7 +5,7 @@ import json
 from agent.emulator import Emulator
 from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to_openai_format, convert_anthropic_message_history_to_google_format, extract_tool_calls_from_gemini
 from config import MINI_MODEL, ANTHROPIC_MINI_MODEL_NAME, GEMINI_MINI_MODEL_NAME, OPENAI_MINI_MODEL_NAME, MAX_TOKENS_MINI, TEMPERATURE, MAX_TOKENS_OPENAI
-from agent.tool_definitions import PRESS_BUTTON_SCHEMA, talk_to_npc_or_pick_up_item_SCHEMA, NAVIGATE_TO_COORDINATE_SCHEMA
+from agent.tool_definitions import PRESS_BUTTON_SCHEMA, TALK_TO_NPC_SCHEMA, NAVIGATE_TO_COORDINATE_SCHEMA
 
 from google.genai import types
 from google.genai.errors import ServerError
@@ -18,7 +18,7 @@ from typing import Any, Optional
 # Maybe it's own file if it gets too big, but for now I like just having this here.
 SMALL_TASK_TOOL_DEFINITIONS = [
     PRESS_BUTTON_SCHEMA,
-    talk_to_npc_or_pick_up_item_SCHEMA,
+    TALK_TO_NPC_SCHEMA,
     NAVIGATE_TO_COORDINATE_SCHEMA,
     {
         "name": "task_done",
