@@ -138,17 +138,20 @@ class LocationCollisionMap:
         for d in range(depth):
             new_tiles: set[tuple[int, int]] = set()
             for tile in cur_tiles:
+                # if the tile itsellf is "off the edge" from a explored area then it's not an exploration tile.
+                valid_exploration_tile = not ((tile[0] - self.col_offset - 4 < min(0, self.col_offset) and "left" in self.discovered_edges) or (tile[1] - self.row_offset - 4 < min(0, self.row_offset) and "up" in self.discovered_edges) or (tile[0] - self.col_offset + 5 > self.internal_map.shape[0] - 1 and "right" in self.discovered_edges) or (tile[1] - self.row_offset + 4 > self.internal_map.shape[1] - 1 and "down" in self.discovered_edges))         
                 candidate_tiles = ((tile[0] + 1, tile[1]), (tile[0] - 1, tile[1]), (tile[0], tile[1] + 1), (tile[0], tile[1] - 1))  # I feel like there's a smarter way
                 for candidate in candidate_tiles:
                     shifted_col = candidate[0] - self.col_offset
                     shifted_row = candidate[1] - self.row_offset
                     if (shifted_col < min(0, self.col_offset) and "left" not in self.discovered_edges) or (shifted_row < min(0, self.row_offset) and "up" not in self.discovered_edges) or (shifted_col > self.internal_map.shape[0] - 1 and "right" not in self.discovered_edges) or (shifted_row > self.internal_map.shape[1] - 1 and "down" not in self.discovered_edges):
-                        adjacent_to_unexplored_or_edge.add(tile)
-                        continue
+                        if valid_exploration_tile:
+                            adjacent_to_unexplored_or_edge.add(tile)
                     if shifted_col < 0 or shifted_row < 0 or shifted_col > self.internal_map.shape[0] - 1 or shifted_row > self.internal_map.shape[1] - 1:
-                        continue
+                        continue  # candidate is out of bounds
                     if self.internal_map[shifted_col][shifted_row] == -1:
-                        adjacent_to_unexplored_or_edge.add(tile)
+                        if valid_exploration_tile:
+                            adjacent_to_unexplored_or_edge.add(tile)
                     if candidate in visited_tiles:
                         continue
                     if self.internal_map[shifted_col][shifted_row] == 1:   # the only passable scenario
@@ -747,7 +750,7 @@ class SimpleAgent:
                             all_labels.append(((nearby_col, nearby_row), this_col))  # Note that we only care about our current location
         return all_labels
     
-    def press_buttons(self, buttons: list[str], wait: bool, tool_id: str, include_text_map: bool=True, is_subtool: bool=False) -> dict[str, Any]:
+    def press_buttons(self, buttons: list[str], wait: bool, tool_id: str, include_text_map: bool=True, is_subtool: bool=False, suppress_button_repetition_warning: bool=False) -> dict[str, Any]:
         self.text_display.add_message(f"[Buttons] Pressing: {buttons} (wait={wait})")
         
 
@@ -756,26 +759,28 @@ class SimpleAgent:
             self.button_history.extend(buttons)
             if len(self.button_history) > MAX_BUTTON_HISTORY:
                 self.button_history = self.button_history[MAX_BUTTON_HISTORY - len(self.button_history):]
-            a_count = 0
-            for button in reversed(self.button_history):
-                if button != "a":
-                    break
-                a_count += 1
-                if a_count > MAX_A_PRESS:
-                    button_repetition_warning = f"\nWARNING: You have pressed A at least {MAX_A_PRESS} times in a row. This is a task that may be suitable for a subagent."
-            dir_count = 0
-            for button in reversed(self.button_history):
-                if button not in ["left", "right", "down", "up"]:
-                    break
-                dir_count += 1
-                if dir_count > MAX_DIRECTION_PRESS:
-                    button_repetition_warning = f"\nWARNING: You have pressed a direction button at least {MAX_A_PRESS} times in a row. It looks like you may be navigating or trying to talk. Use navigate_to_coordinate or talk_to_npc_or_pick_up_item instead."
+            if not suppress_button_repetition_warning:   
+                a_count = 0
+                for button in reversed(self.button_history):
+                    if button != "a":
+                        break
+                    a_count += 1
+                    if a_count > MAX_A_PRESS:
+                        button_repetition_warning = f"\nWARNING: You have pressed A at least {MAX_A_PRESS} times in a row. This is a task that may be suitable for a subagent."
+                dir_count = 0
+                for button in reversed(self.button_history):
+                    if button not in ["left", "right", "down", "up"]:
+                        break
+                    dir_count += 1
+                    if dir_count > MAX_DIRECTION_PRESS:
+                        button_repetition_warning = f"\nWARNING: You have pressed a direction button at least {MAX_A_PRESS} times in a row. It looks like you may be navigating or trying to talk. Use navigate_to_coordinate or talk_to_npc_or_pick_up_item instead."
 
         # This really sucks, but going one by one lets us catch location changes better,
+        last_location = None
         for button in buttons:
             result, last_coords = self.emulator.press_buttons([button], wait, wait_for_finish=True)  # we need to wait for this to finish or the map may try to update mid move, which is bad.
             location = self.emulator.get_location()
-            if location != self.last_location :
+            if location != last_location :
                 coords = self.emulator.get_coordinates()
                 all_warps = self.emulator.get_warps()
                 if location not in self.full_collision_map:
@@ -799,7 +804,7 @@ class SimpleAgent:
                             self.full_collision_map[location].mark_discovered_edge("right")
                         else:
                             self.full_collision_map[location].mark_discovered_edge("left")
-                self.last_location = location
+                last_location = location
 
         self.last_coords = last_coords
 
@@ -1087,6 +1092,14 @@ class SimpleAgent:
                         "content": content,
                     }
         elif tool_name == "explore_direction":
+            if self.emulator.get_in_combat():
+                return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Invalid. Navigation not possible while in combat."}
+                        ],
+                    }
             dialog = self.emulator.get_active_dialog()
             if dialog is not None:
                 return {
@@ -1108,8 +1121,8 @@ class SimpleAgent:
                 if not local_map.distances:  # this can happen when we cross into a new location, for example.
                     local_map.update_distances()
                 if not suggestion_set:
-                    # Nothing is unexplored. In that case let's just do as far in one direction as possible.
-                    suggestion_set = set((x, y) for y in range(local_map.row_offset, local_map.internal_map.shape[1] + local_map.row_offset) for x in range(local_map.col_offset, local_map.internal_map.shape[0] + local_map.col_offset) if local_map.distances.get((x, y)))
+                    # Nothing is unexplored.
+                    return None
                 if direction == "up":  # we want the lowest row count
                     suggestion = min(suggestion_set, key=lambda x: x[1])
                     if suggestion[1] > coords[1] + laxness:
@@ -1138,6 +1151,14 @@ class SimpleAgent:
                     result["content"].append({"type": "text", "text": f"Exploration terminated. New location reached."})
                     return result
                 suggestion_set = self.full_collision_map[location].adjacent_to_unexplored_or_edge
+                if suggestion_set is None:
+                    return {
+                            "type": "tool_result",
+                            "tool_use_id": tool_id,
+                            "content": [
+                                {"type": "text", "text": f"Aborted. No valid unexplored tiles."}
+                            ],
+                        }
                 candidate = get_best_candidate(suggestion_set, direction)
                 if candidate is None:
                     if result is None:
@@ -1432,7 +1453,7 @@ Extra tip: Think carefully before trying to move: Is there dialogue on the scree
             direction = "up"
         else:
             direction = "down"
-        button_press_result = self.press_buttons([direction, "a"], True, tool_id, is_subtool=is_subagent)
+        button_press_result = self.press_buttons([direction, "a"], True, tool_id, is_subtool=is_subagent, suppress_button_repetition_warning=True)
         button_press_result_content = button_press_result["content"]  # Here we keep the content, since this contains the screenshot etc. the model needs.
 
         # Did we move?
@@ -1647,7 +1668,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 # tool_id = tool_call.call_id
             buttons = tool_input["buttons"]
             wait = tool_input.get("wait", True)
-        result = self.press_buttons(buttons, wait, tool_id, is_subtool=is_subagent)
+        result = self.press_buttons(buttons, wait, tool_id, is_subtool=is_subagent, suppress_button_repetition_warning=True)
         result["content"].append({"type": "text", "text": "NAVIGATED USING navigate_to_coordinate" + one_tile_off_warning})
         return result
 
@@ -1729,6 +1750,28 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                         
                     else:
                         self.strip_text_map_and_images_from_history(self.message_history)
+                        # If we're in navigation mode, and we just got into combat, the screenshot might be missing.
+                        if self.detailed_navigator_mode and self.message_history:
+                            last_message = self.message_history[-1]
+                            if isinstance(last_message, dict):
+                                maybe_content = last_message.get("content")
+                                if maybe_content is not None:
+                                    for content in maybe_content:
+                                        if content.get("type") == "image":
+                                            break
+                                    else:
+                                        # Image is missing
+                                        screenshot = self.emulator.get_screenshot()
+                                        screenshot_b64 = self.get_screenshotb64(screenshot)
+                                        maybe_content.append({
+                                            "type": "image",
+                                            "source": {
+                                                "type": "base64",
+                                                "media_type": "image/png",
+                                                "data": screenshot_b64,
+                                            },
+                                        })
+                                breakpoint()
                         messages = copy.deepcopy(self.message_history)
 
                     if len(messages) >= 3:

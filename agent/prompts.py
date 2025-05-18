@@ -23,9 +23,14 @@ Here is a brief set of instructions and guidelines:
 PRIORITY:
 1. Use any NEW exit or warp you see (including ladders, doors, etc.).  This may require walking off the edge of the map.
     1a. If you just arrived from a particular exit, there is no need to go back through it.
+    1b. Only use NEW exits. If the map already has a warp or exit on it that you didn't find recently. DON'T go there.
+    1c. Entering new warps is becomes HIGHEST PRIORITY as soon as you see one. You may use navigate_to_coordinate to try to go
+        there and skip all other tasks.
 2. Use the "explore_direction" tool whenever possible to uncover new parts of the map.
     2a. Use the other tools only to perform specific tasks (talk to a NPC, move to a warp, etc.)
-3. Talk to any NPCs and pick up any items you see.
+3. Pick up any items you see.
+4. Talk to any NEW NPCs you see. Do not go to NPCs in explored regions of the map, as this is repeititive.
+    4a. Again: Only talk to NPCS you recently just found.
 
 Additional tips:
 
