@@ -16,7 +16,8 @@ FRIENDLY_MODEL_NAME_LOOKUP = {
 
 FULL_NAVIGATOR_PROMPT = """Your job is to perform navigation through an area of Pokemon Red.
 
-You will be given an text_based map of the area as well as a screenshot of the current game state.
+You will be given an text_based map of the area as well as a screenshot of the current game state. In addition,
+at the very end of this prompt you will be provided a specific goal to try to achieve.
 
 Here is a brief set of instructions and guidelines:
 
@@ -28,8 +29,10 @@ PRIORITY:
         there and skip all other tasks.
 2. Use the "explore_direction" tool whenever possible to uncover new parts of the map.
     2a. Use the other tools only to perform specific tasks (talk to a NPC, move to a warp, etc.)
-3. Pick up any items you see.
-4. Talk to any NEW NPCs you see. Do not go to NPCs in explored regions of the map, as this is repeititive.
+    2b. If this tool fails (returns "No valid unexplored tiles."), call end_navigation and explain that the whole map is explored already.
+3. Do you best to achieve the goal given. If the goal is achieved, call end_navigation and explain that you are done.
+4. Pick up any items you see.
+5. Talk to any NEW NPCs you see. Do not go to NPCs in explored regions of the map, as this is repeititive.
     4a. Again: Only talk to NPCS you recently just found.
 
 Additional tips:
@@ -124,6 +127,7 @@ trying to go straight for the exit. Make sure to emphasize this when looking at 
 Please write down a list of FACTS about the current game state, organized into the following groups, sorted from most reliable to least reliable:
 
 1. Data from RAM (100% accurate. This is provided directly by the developer and is not to be questioned.)
+    1a. Note about reading RAM locations. The interior of buildings is always labeled differently from the city proper. So, if the RAM location is "VIRIDIAN CITY", the user is NOT in any building.
 2. Information from your own knowledge about Pokemon Red (Mostly reliable, dependent on recollection)
 3. Information from the checkpoints (Mostly reliable)
 4. Information from the text_based map (Mostly reliable, dependent on accuracy reading the map)
@@ -170,13 +174,17 @@ Next to each fact you will likely find a percentage indicating how reliable the 
 Using the data from the _more_ reliable fact groups, please remove any inaccuracies from the data from the less reliable fact groups. Remove anything that doesn't make sense.
 
 Examples:
-1. The data from RAM says the current location is VIRIDIAN_CITY but the conversation history claims the current location is PALLET_TOWN
-    1a. ANSWER: Delete the claim that the location is PALLET_TOWN, since the RAM data is far more reliable than conversation history.
-2. The data from Knowledge about Pokemon Red asserts that after leaving the starting house, you have to go North of Pallet Town to trigger an encounter with Professor Oak. The previous game summary does not mention that this has happened yet.
+1. The data from RAM says the current location is VIRIDIAN CITY but the conversation history claims the current location is PALLET TOWN
+    1a. ANSWER: Delete the claim that the location is PALLET TOWN, since the RAM data is far more reliable than conversation history.
+2. The data from RAM says the current location is PEWTER CITY but the conversation history claims to be in the Pewter City Pokemon Center
+    2a. ANSWER: Delete the claim that the location is Pewter City Pokemon Center and all associated claims (e.g. Nurse Joy's presence). The RAM data for a building will always name the building (e.g. PEWTER CITY POKEMON CENTER). Since the RAM data says PEWTER CITY without mentioning the Pokemon Center, the player is OUTSIDE the pokemon Center, not inside. 
+3. The data from Knowledge about Pokemon Red asserts that after leaving the starting house, you have to go North of Pallet Town to trigger an encounter with Professor Oak. The previous game summary does not mention that this has happened yet.
    But on the screenshot it appears that Professor Oak is already standing inside Oak's Lab, and the conversation history mentions trying to talk with Professor Oak.
     2b. ANSWER: Delete any claims that Professor Oak is in the lab or needs to be talked to, and emphasize that you must go north of Pallet Town. Previous knowledge of Pokemon Red and the previous game summary is much more reliable than glasncing at the screenshot or the error-prone assertions in the conversation history.
 
 In addition, delete facts from the less reliable sources (7, 8) if they are not very reliable, and also delete any coordinate information contained in these categories, as they are often wrong.
+
+DELETE ALL EXPLICIT COORDINATES. DO NOT OUTPUT ANYTHING INCLUDING COORDINATES LIKE (X, Y).
 
 Output a corrected list of facts about the game state. Make sure that each fact has a percentage next to it indicating how reliable you think it is (e.g. 0%, 25%, 50%, 100%)
 
@@ -195,17 +203,13 @@ using a curated list of FACTS you will be provided. This information will be use
 
 Next to each fact you will likely find a percentage indicating how reliable the fact is. Use this as a guide and avoid using unreliable facts.
 
-Before writing your summary, write down the following questions, followed by a detailed response
-
-What if the current key objective is flawed? What would that means?
-
-Keep that in mind as you write the summary.
-
 Ensure that the summary you provide contains the following information:
 
 1. Key game events and milestones reached
 2. Important decisions made
 3. Current key objectives or goals
+
+HIGH PRIORITY: REMOVE ALL REFERENCES to explicit coordinates. This can perpetuate mistakes. Do not say "the Pokemon center is likely at (X, Y)", for example.
 
 Make sure that each fact has a percentage next to it indicating how reliable you think it is (e.g. 0%, 25%, 50%, 100%)
 
@@ -328,6 +332,8 @@ mark_checkpoint: call this when you achieve a major navigational objective OR bl
     Make sure to include a precise description of what you achieved. For instance "DELIVERED OAK'S PARCEL" or "BEAT MISTY".
 
 navigate_to: You may make liberal use of the navigation tool to go to locations on screen, but it will not path you offscreen.
+
+ask_for_advice: Ask for advice on a current topi you are having difficulty with. Currently, the only topic is "SHOPPING".
 """
 
 SYSTEM_PROMPT = f"""You are playing Pokemon Red.
@@ -340,6 +346,8 @@ you take an action, and you are provided with a text-based map based on your pre
 
 You have only limited access to the emulator controls (left, right, down, up) and will not directly perform all game actions. Instead Your role is to make key decisions, delegate, use your vision, and perform navigation.
 This is reflected in the tools you have been provided.
+
+Note that you have access to a "ask_for_advice" tool to ask for help when stuck, though the only topic available at the moment is "shopping".
 
 More specifically, you will handle the following:
 1. Decision-making: what to do, how to progress the game, current goals, as well as combat strategy.
@@ -456,6 +464,8 @@ bookmark_location_or_overwrite_label: Use this to label navigation landmarks, de
 log_npc_name_and_dialogue: Use this to label NPCs after talking to them.
 
 mark_checkpoint: call this when you achieve a major navigational objective OR blackout
+
+ask_for_advice: Ask for advice on a current topic you are having difficulty with. Only a few items listed for now.
 """
 
 
