@@ -45,7 +45,7 @@ BASE_IMAGE_SIZE = (160, 144)  # In tiles, 16 x 10 columns and 16 x 9 rows
 # This structure assumes there's only one type of entry per tile, but actually tiles can be both IMPASSABLE and SPRITES or a Player or Sprite can be standing on a warp.
 # This is an oversight that should maybe be fixed, but is hard to fix without a lot of restructuring.
 class LocationCollisionMap:
-    def __init__(self, initial_collision_map: np.ndarray, initial_sprite_locations: set[tuple[tuple[int, int], int]], initial_coords: tuple[int, int], nearby_warps: Optional[list[tuple[int, int]]]=None):
+    def __init__(self, initial_collision_map: np.ndarray, initial_sprite_locations: set[tuple[tuple[int, int], int]], initial_coords: tuple[int, int], initial_tile_map: np.ndarray, nearby_warps: Optional[list[tuple[int, int]]]=None):
         # initial_collision_map is a 9 x 10 player-centered collision map which is 0 is impassable and 1 otherwise
         # Internally we store an expanding map based on locations we've been, with -1 in unknown spots, 2 in sprite locations, 3 in player location, 4 is item locations, 5 is warps, and otherwise 0/1 as well.
         # We just accept that moving NPC locations are going to be inaccurate.
@@ -55,9 +55,15 @@ class LocationCollisionMap:
         self.player_coords = initial_coords
         self.col_offset = initial_coords[0] - 4
         self.row_offset = initial_coords[1] - 4
+        # tile_map is a game_area() from the emulator that contains tile information. Used to extract things like grass or ledges.
+        # tile_map is 18 x 20, to allow for the possibiltiy of multiple thinsg in the same place. Confusingly, it is row first.
+        # Grass is 338.
         self.internal_map = -np.ones((10, 9), dtype=np.int8) # We make our map the "proper" order that everything else is.
+        self.tile_map = np.zeros((10, 9), dtype=np.int8)   # for now 1 is grass, 0 is anything else.
         for row in range(9):
             for col in range(10):
+                if np.any(initial_tile_map[row*2:row*2+2, col*2:col*2+2] == 338):  # grass
+                    self.tile_map[col][row] = 1
                 if row == 4 and col == 4:  # player character
                     self.internal_map[col][row] = 3
                 elif nearby_warps is not None and (col + self.col_offset, row + self.row_offset) in nearby_warps:
@@ -77,7 +83,7 @@ class LocationCollisionMap:
     def mark_discovered_edge(self, direction: Literal["up", "down", "left", "right"]):  # some maps have transitions from other maps. In that situation we need to mark everything beyond the boundary in the direction as explored.
         self.discovered_edges.add(direction)
 
-    def update_map(self, collision_map: np.ndarray, sprite_locations: set[tuple[tuple[int, int], int]], coords: tuple[int, int], nearby_warps: Optional[list[tuple[int, int]]]=None):
+    def update_map(self, collision_map: np.ndarray, sprite_locations: set[tuple[tuple[int, int], int]], coords: tuple[int, int], tile_map: np.ndarray, nearby_warps: Optional[list[tuple[int, int]]]=None):
         # Remove the previous player marker. Most convenient to do it right now.
         self.internal_map[self.player_coords[0] - self.col_offset][self.player_coords[1] - self.row_offset] = 1
         self.player_coords = coords
@@ -96,6 +102,7 @@ class LocationCollisionMap:
         expand_row_back = new_max_row - (self.row_offset + cur_size[1] - 1)
         expand_row_back = expand_row_back if expand_row_back > 0 else 0
         self.internal_map = np.pad(self.internal_map, pad_width=[(expand_col_front, expand_col_back), (expand_row_front, expand_row_back)], constant_values=-1)
+        self.tile_map = np.pad(self.tile_map, pad_width=[(expand_col_front, expand_col_back), (expand_row_front, expand_row_back)], constant_values=0)
 
         self.col_offset = min(new_min_col, self.col_offset)
         self.row_offset = min(new_min_row, self.row_offset)
@@ -105,6 +112,8 @@ class LocationCollisionMap:
         local_row_offset = new_min_row - self.row_offset
         for row in range(9):
             for col in range(10):
+                if np.any(tile_map[row*2:row*2+2, col*2:col*2+2] == 338):  # grass
+                    self.tile_map[col][row] = 1
                 if row == 4 and col == 4:  # player character. It's okay to wipe warp information temporarily because it's almost certainly coming back.
                     self.internal_map[col + local_col_offset][row + local_row_offset] = 3
                     continue
@@ -212,7 +221,6 @@ class LocationCollisionMap:
         return f"|{base_str[:width]}"
 
     def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None, direction: Optional[str]=None, local_label_archive: Optional[dict[int, dict[int, str]]]=None) -> str:
-
         # We prepare two identical versions simultaneously: A readable nice ASCII for humans, and the long-winded one for models
 
         horizontal_labels = list(range(self.col_offset, self.col_offset+self.internal_map.shape[0]))
@@ -269,6 +277,10 @@ class LocationCollisionMap:
                 real_col = self.col_offset + col_num
 
                 row_piece = ""
+                if self.tile_map[col_num][row_num] == 1 and col > 0:
+                    row_piece = "Grass; "
+                else:
+                    row_piece = "Not grass; "
                 if local_label_archive is not None:
                     this_label_row = local_label_archive.get(real_row)
                     if this_label_row is not None:
@@ -616,6 +628,11 @@ class SimpleAgent:
                     self.button_history = pickle.load(fr)
                     self.navigator_goal = pickle.load(fr)
                     self.exploration_repeats = pickle.load(fr)
+                    for x in self.full_collision_map.values():
+                        try:
+                            x.tile_map
+                        except AttributeError:
+                            x.tile_map = np.zeros(shape=x.internal_map.shape, dtype=np.int8)
                 except Exception:
                     pass
             breakpoint()
@@ -746,7 +763,7 @@ class SimpleAgent:
         # slightly more efficient than setdefault
         this_map = self.full_collision_map.get(location)
         if this_map is None:
-            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps) 
+            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, self.emulator.pyboy.game_area(), nearby_warps) 
             # Handle edge case: if we're not standing on a warp, then we just came in through a zone transition and
             # need to inform the mapping tool.
             if coords not in all_warps:
@@ -761,7 +778,7 @@ class SimpleAgent:
                         self.full_collision_map[location].mark_discovered_edge("left")
             return self.full_collision_map[location].to_ascii(local_location_tracker, direction=direction, local_label_archive=this_location)
         else:
-            this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps)
+            this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords, self.emulator.pyboy.game_area(), nearby_warps)
             return this_map.to_ascii(local_location_tracker, direction=direction, local_label_archive=this_location)
         
     def get_all_location_labels(self, location: str) -> list[tuple[tuple[int, int], str]]:
@@ -826,7 +843,7 @@ class SimpleAgent:
                             nearby_warps.append(entry)
                     collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
                     downsampled_terrain = self.emulator._downsample_array(collision_map)
-                    self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps) 
+                    self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, self.emulator.pyboy.game_area(), nearby_warps) 
                 # Handle edge case: if we're not standing on a warp, then we just came in through a zone transition and
                 # need to inform the mapping tool.
                 if coords not in all_warps:
