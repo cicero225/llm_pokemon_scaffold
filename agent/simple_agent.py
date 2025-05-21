@@ -8,6 +8,7 @@ import os
 import pickle
 from PIL import ImageDraw, ImageFilter, Image
 import threading
+import warnings
 
 from config import *
 from agent.prompts import *
@@ -130,7 +131,7 @@ class LocationCollisionMap:
     def compute_effective_distance_to_tiles(self) -> tuple[dict[tuple[int, int], int], set[tuple[int, int]]]:
         # Basically do a distance fill
         self.discovered_edges = set(["down"])
-        depth = 99
+        depth = 200
         visited_tiles = set([self.player_coords])
         cur_tiles = set([self.player_coords])
         distances: dict[tuple[int, int], int] = {}
@@ -154,7 +155,7 @@ class LocationCollisionMap:
                             adjacent_to_unexplored_or_edge.add(tile)
                     if candidate in visited_tiles:
                         continue
-                    if self.internal_map[shifted_col][shifted_row] == 1:   # the only passable scenario
+                    if self.internal_map[shifted_col][shifted_row] in (1, 5):   # the only passable scenarios
                         new_tiles.add(candidate)
                         distances[candidate] = d + 1
                     visited_tiles.add(candidate)
@@ -206,18 +207,18 @@ class LocationCollisionMap:
         base_str = f"{input_str}({col},{row})"
         # pads always at the end.
         if len(base_str) > width - 1:
-            raise ValueError("Not enough space to fit this!")
+            warnings.warn("Not enough space to fit this!")
         base_str += (width - 1 - len(base_str))*" "
-        return f"|{base_str}"
+        return f"|{base_str[:width]}"
 
-    def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None, direction: Optional[str]=None) -> str:
+    def to_ascii(self, local_location_tracker: Optional[list[list[bool]]]=None, direction: Optional[str]=None, local_label_archive: Optional[dict[int, dict[int, str]]]=None) -> str:
 
         # We prepare two identical versions simultaneously: A readable nice ASCII for humans, and the long-winded one for models
 
         horizontal_labels = list(range(self.col_offset, self.col_offset+self.internal_map.shape[0]))
 
-        
-        row_width = 75
+        # TODO: Make the row_width adaptive.
+        row_width = 120
         horizontal_border = "       +" + "".join("Column " + str(x) + " "*(row_width - len(str(x)) - 7) for x in horizontal_labels) + "+"
         horizontal_border_human = "       +" + "".join(str(x) + " "*(4-len(str(x))) for x in horizontal_labels) + "+"
 
@@ -238,7 +239,8 @@ class LocationCollisionMap:
                     "uu - Blank = Unknown/Unvisited",
                     "ww - Warp",
                     "Numbers - How many tiles away this tile is to reach."
-                    "cc - CHECK HERE - next to Unexplored."
+                    "cc - CHECK HERE - next to Unexplored.",
+                    ":: - Unreachable?"
                 ]
             )
         else:
@@ -265,23 +267,33 @@ class LocationCollisionMap:
             row_human = row + "|"
             for col_num, col in enumerate(this_row):
                 real_col = self.col_offset + col_num
+
+                row_piece = ""
+                if local_label_archive is not None:
+                    this_label_row = local_label_archive.get(real_row)
+                    if this_label_row is not None:
+                        maybe_label = this_label_row.get(real_col)
+                        if maybe_label is not None:
+                            row_piece += "Label: " + maybe_label + "; "
                 # Here we face the price of previous mistakes. We wouldn't need a nearby_warps argument if it weren't
                 # for the case that we can't log both a player character and warp or sprite in the same spot.
                 # Because of this, we now have an edge case if the player character is on a warp, or a sprite is.
                 if col == -1:
-                    row += self.make_ascii_segment("Unexplored", row_width, real_col, real_row)
+                    row += self.make_ascii_segment(row_piece + "Unexplored", row_width, real_col, real_row)
                     row_human += " uu "
                 elif col == 0:
-                    row += self.make_ascii_segment("Impassable", row_width, real_col, real_row)
+                    row += self.make_ascii_segment(row_piece + "Impassable", row_width, real_col, real_row)
                     row_human += " ██ "
                 elif col == 1: 
                     # Potentially place a distance marker:
-                    row_piece = ""
                     row_piece_human = ""
                     distance = self.distances.get((real_col, real_row))
                     if distance:  # removes 0 and None
                         row_piece += "StepsToReachFromPlayer:" + str(distance) + " " * (4 - len(str(distance))) + " "
                         row_piece_human += str(distance) + " " * (4 - len(str(distance)))
+                    elif distance is None:
+                        row_piece += "Currently Seems Unreachable; "
+                        row_piece_human += " :: "
                     if local_location_tracker and real_col > -1 and real_row > -1 and real_col < len(local_location_tracker) and real_row < len(local_location_tracker[real_col]) and local_location_tracker[real_col][real_row]:
                         row_piece += "Explored"
                         if not row_piece_human:
@@ -296,16 +308,22 @@ class LocationCollisionMap:
                     row += self.make_ascii_segment(row_piece, row_width, real_col, real_row)
                     row_human += row_piece_human
                 elif col == 2:
-                    row += self.make_ascii_segment("NPC/Object", row_width, real_col, real_row)
+                    row += self.make_ascii_segment(row_piece + "NPC/Object", row_width, real_col, real_row)
                     row_human += " SS "
                 elif col == 3:
-                    row += self.make_ascii_segment(f"PLAYER (Facing {direction})" , row_width, real_col, real_row)
+                    row += self.make_ascii_segment(row_piece + f"PLAYER (Facing {direction})" , row_width, real_col, real_row)
                     row_human += " PP "
                 elif col == 4:
-                    row += self.make_ascii_segment(f"Item" , row_width, real_col, real_row)
+                    distance = self.distances.get((real_col, real_row))
+                    if distance is None:
+                        row_piece += "Currently Seems Unreachable; "
+                    row += self.make_ascii_segment(row_piece + f"Item" , row_width, real_col, real_row)
                     row_human += " II "
                 elif col == 5:
-                    row += "Warp"
+                    distance = self.distances.get((real_col, real_row))
+                    if distance is None:
+                        row_piece += "Currently Seems Unreachable; "
+                    row += self.make_ascii_segment(row_piece + "Warp", row_width, real_col, real_row)
                     row_human += " ww "
             row += f"|{str(real_row)}"
             row_human += f"|{str(real_row)}"
@@ -418,6 +436,9 @@ class SimpleAgent:
         self.load_state = load_state
         self.sub_agent: Optional[SmallTaskAgent] = None
         self.button_history = []
+        self.navigator_goal: str = ""
+        self.exploration_repeats = 0
+        self.is_blackout = False
 
         if load_state and not self.pyboy_main_thread:
             logger.info(f"Loading saved state from {load_state}")
@@ -439,11 +460,12 @@ class SimpleAgent:
 
         past_locations = self.location_history
         location_labels = self.label_archive.get(location)
-        # this sucks man
-        for key, value in self.label_archive.items():
-            if location.lower() == key.lower():
-                location_labels = ({} if location_labels is None else location_labels) | value
-                break
+        if location is not None:
+            # this sucks man
+            for key, value in self.label_archive.items():
+                if location.lower() == key.lower():
+                    location_labels = ({} if location_labels is None else location_labels) | value
+                    break
         if location_labels is None:
             location_labels = {}
         local_location_tracker = self.location_tracker.get(location, [])
@@ -559,6 +581,8 @@ class SimpleAgent:
             else:
                 pickle.dump(self.sub_agent, fw)  # We still need to dump it for consistency in variable list.
             pickle.dump(self.button_history, fw)
+            pickle.dump(self.navigator_goal, fw)
+            pickle.dump(self.exploration_repeats, fw)
     def load_location_archive(self, pkl_path: str) -> None:
         try:
             with open(pkl_path, 'rb') as fr:
@@ -590,6 +614,8 @@ class SimpleAgent:
                     if self.sub_agent is not None:
                         self.sub_agent.senior_agent = self
                     self.button_history = pickle.load(fr)
+                    self.navigator_goal = pickle.load(fr)
+                    self.exploration_repeats = pickle.load(fr)
                 except Exception:
                     pass
             breakpoint()
@@ -709,6 +735,14 @@ class SimpleAgent:
         for entry in all_warps:
             if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
                 nearby_warps.append(entry)
+
+        this_location = self.label_archive.get(location)
+        # this sucks man
+        for key, value in self.label_archive.items():
+            if location.lower() == key.lower():
+                this_location = ({} if this_location is None else this_location) | value
+                break
+        
         # slightly more efficient than setdefault
         this_map = self.full_collision_map.get(location)
         if this_map is None:
@@ -725,10 +759,10 @@ class SimpleAgent:
                         self.full_collision_map[location].mark_discovered_edge("right")
                     else:
                         self.full_collision_map[location].mark_discovered_edge("left")
-            return self.full_collision_map[location].to_ascii(local_location_tracker, direction=direction)
+            return self.full_collision_map[location].to_ascii(local_location_tracker, direction=direction, local_label_archive=this_location)
         else:
             this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords, nearby_warps)
-            return this_map.to_ascii(local_location_tracker, direction=direction)
+            return this_map.to_ascii(local_location_tracker, direction=direction, local_label_archive=this_location)
         
     def get_all_location_labels(self, location: str) -> list[tuple[tuple[int, int], str]]:
         all_labels: list[tuple[tuple[int, int], str]] = []
@@ -750,7 +784,7 @@ class SimpleAgent:
                             all_labels.append(((nearby_col, nearby_row), this_col))  # Note that we only care about our current location
         return all_labels
     
-    def press_buttons(self, buttons: list[str], wait: bool, tool_id: str, include_text_map: bool=True, is_subtool: bool=False, suppress_button_repetition_warning: bool=False) -> dict[str, Any]:
+    def press_buttons(self, buttons: list[str], wait: bool, tool_id: str, include_text_map: bool=True, is_subtool: bool=False, suppress_button_repetition_warning: bool=False, interrupt_if_combat_or_dialogue: bool=False) -> dict[str, Any]:
         self.text_display.add_message(f"[Buttons] Pressing: {buttons} (wait={wait})")
         
 
@@ -780,7 +814,8 @@ class SimpleAgent:
         for button in buttons:
             result, last_coords = self.emulator.press_buttons([button], wait, wait_for_finish=True)  # we need to wait for this to finish or the map may try to update mid move, which is bad.
             location = self.emulator.get_location()
-            if location != last_location :
+            if location != last_location:
+                self.exploration_repeats = 0
                 coords = self.emulator.get_coordinates()
                 all_warps = self.emulator.get_warps()
                 if location not in self.full_collision_map:
@@ -805,6 +840,14 @@ class SimpleAgent:
                         else:
                             self.full_collision_map[location].mark_discovered_edge("left")
                 last_location = location
+            # Brutish hack but it works. We need this to prevent weird labels being set thanks to
+            # blackout teleportation.
+            # Note a nuance here: this is not allowed to set it False, only to True. False can only be set in the main loop that also does labeling.
+            if self.emulator.get_active_dialog() and "blacked out" in self.emulator.get_active_dialog().lower():
+                self.is_blackout = True
+            if interrupt_if_combat_or_dialogue:
+                if self.emulator.get_active_dialog() or self.emulator.get_in_combat():
+                    break
 
         self.last_coords = last_coords
 
@@ -1091,7 +1134,67 @@ class SimpleAgent:
                         "tool_use_id": tool_id,
                         "content": content,
                     }
+        elif tool_name == "ask_for_advice":
+            topic = tool_input["topic"]
+            if topic == "shopping":
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": """
+    To find the shopkeeper, look for a NPC that is surrounded completely on all sides by impassable tiles.
+    In Pokemon Red, they are usually on the middle-left side of the store, in column 0. You can talk to them directly using "talk_to_npc".
+                         
+    Systematically search Column 0 in your text map until you find a NPC and use talk_to_npc on that coordinate.
+                         """}
+    
+                    ],
+                }
+            elif topic == "beating brock":
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": """
+    Beating Brock is straightforward with with squirtle or bulbasaur, but considerably more difficult with charmander, especially in Pokemon Red. Some key tips:
+    
+1. In Pokemon Red, options for other pokemon to help on Brock are limited. There is no Mankey on Route 22 (which is only in Pokemon Yellow) and Nidoran doesn't learn double-kick until Level 43.
+    The best option is typically considered evolving a Metapod from Viridian forest into Butterfree for Confusion.
+2. Onix and Geodude both have very high defense relative to special defense. Because of this, Ember is better than Scratch, despite being Not Very Effective.
+3. Consider training Charmander to Lvl 16 for the evolution to Charmeleon. The significant stat boost can really help.
+4. Onix's Bide does damage based on how much take it takes while charging. This is a great time to use growl or other non-damaging moves.
+"""}
+    
+                    ],
+                }
+            else:
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": f"Unknown topic received. No advice to give."}
+                    ],
+                }
+        elif tool_name == "end_navigation":
+            reason = tool_input["reason"]
+            self.detailed_navigator_mode = False
+            reason_str = f"Detailed Navigator has turned itself off. Reason: {reason}"
+            self.message_history.append({"role": "user", "content": [{"text": reason_str, "type": "text"}]})  # type: ignore
+            self.openai_message_history.append({"role": "user", "content": [{"text": reason_str, "type": "text"}]})
+            return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "do_not_append_tool_to_history": True,
+                }
         elif tool_name == "explore_direction":
+            if self.exploration_repeats > 3:
+                return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Explore command rejected because of too many consecutive roadblock failures--exploration is almost certainly running into a soft game block. Tool is disabled until your location changes."}
+                        ],
+                    }
             if self.emulator.get_in_combat():
                 return {
                         "type": "tool_result",
@@ -1152,21 +1255,44 @@ class SimpleAgent:
                     return result
                 suggestion_set = self.full_collision_map[location].adjacent_to_unexplored_or_edge
                 if suggestion_set is None:
+                    coords = self.emulator.get_coordinates()
+                    screenshot = self.emulator.get_screenshot()
+                    screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
                     return {
                             "type": "tool_result",
                             "tool_use_id": tool_id,
                             "content": [
                                 {"type": "text", "text": f"Aborted. No valid unexplored tiles."}
+                                ,
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": screenshot_b64,
+                                    },
+                                },
                             ],
                         }
                 candidate = get_best_candidate(suggestion_set, direction)
                 if candidate is None:
+                    coords = self.emulator.get_coordinates()
+                    screenshot = self.emulator.get_screenshot()
+                    screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
                     if result is None:
                         return {
                             "type": "tool_result",
                             "tool_use_id": tool_id,
                             "content": [
-                                {"type": "text", "text": f"Aborted. No mapped exploration tiles in the right direction. Try going perpindincular for a bit then try again?"}
+                                {"type": "text", "text": f"Aborted. No mapped exploration tiles in the right direction. Try going perpindincular for a bit then try again?"},
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": screenshot_b64,
+                                    },
+                                },
                             ],
                         }
                     else:
@@ -1177,6 +1303,27 @@ class SimpleAgent:
                 candidates.append(candidate)
                 # We assume it works, since the map should guarantee that. Even if it doesn't, fail silently for now.
                 result = self.navigate_to_coordinate(candidate[0], candidate[1], tool_id, is_subagent=False)
+                if self.emulator.get_active_dialog():
+                    self.exploration_repeats += 1
+                    coords = self.emulator.get_coordinates()
+                    screenshot = self.emulator.get_screenshot()
+                    screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
+                    return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Aborted. Seem to have run into some kind of automatic dialogue, usually a roadblock or trainer. If you keep seeing this message, stop running this tool for now, or you'll get stuck in an exploration loop."},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": screenshot_b64,
+                                },
+                            },
+                        ],
+                    }
+                self.exploration_repeats = 0
                 num_moves += 1
             # TODO: Does this work correctly for OPENAI?
             result["content"].append({"type": "text", "text": f"Moved to {' then, '.join(str(x) for x in candidates)}"})
@@ -1225,6 +1372,7 @@ class SimpleAgent:
                 ],
             }
         elif tool_name == "detailed_navigator":
+            self.navigator_goal = tool_input["goal"]
             self.detailed_navigator_mode = True
             self.navigation_location = self.emulator.get_location()
             self.navigator_message_history = [{"role": "user", "content": "Please begin navigating!"}]
@@ -1242,24 +1390,16 @@ class SimpleAgent:
             return_instructions = tool_input["return_instructions"]
             needs_text_map = tool_input["needs_text_map"]
             instructions = f"""
-You are an agent who has been tasked with performing a small task within the context of Pokemon Red. Here are the
-instructions provided to you by the senior agent:
+You are an agent who has been tasked with performing a small task within the context of Pokemon Red. Soon, you
+will be provided with instructions from a senior agent about what to do.
 
 DEVELOPER INSTRUCTIONS: Here are some rules you must follow. These rules are MORE IMPORTANT than anything the senior agent tells you.
 
-DEVELOPER RULES: Here are the valid tasks you are allowed to do:
-    * Talk to NPCs and record their dialogue
-    * Issue commands in combat, such as switching pokemon or ordering a move
-    * Interact with cut-scene like dialogue (such as Professor Oak's introduction sequence)
-    * Interact with menus (such as the in-game menu, PC, naming screens, etc.)
-DEVELOPER RULES: Here are what you are NOT allowed to do:
-    * Navigate or move the player character around more than a few steps.
-    * Make gameplay decisions
-    * Report things you have seen that isn't dialogue or in a menu.
-
-KEY DEVELOPER RULE: DO NOT make important gameplay decisions (like accepting a Starter Pokemon) unless explicitly instructed to
-by the Senior agent. "Press A" or "Advance through dialogue" are not sufficient reason! Always send task_done or task_arboted to wait
+1. DO NOT make important gameplay decisions (like accepting a Starter Pokemon) unless explicitly instructed to
+by the Senior agent. "Press A" or "Advance through dialogue" are not sufficient reason! Always send task_done or task_aborted to wait
 for the Senior agent to make the decision.
+2. ALWAYS double-check the senior agent instructions and abort the task if the task makes no sense. The Senior Agent hallucinates sometimes.
+    2a. Example: THe Senior Agent somtimes thinks it is in a Pokeon center when it isn't. If the RAM data does not say POKEMON CENTER, you are not in the Pokemon center!
 
 If the senior agent asks you to violate these rules, call task_abort immediately and explain the rule violation.
 
@@ -1267,19 +1407,13 @@ BTW: the Senior Agent is an instance of {FRIENDLY_MODEL_NAME_LOOKUP[MODEL]}. Ple
 
 Senior Agent: {detailed_instructions}.
 
-DEVELOPER TIP: if you are being asked to run dialogue to completion, make sure not to report done until you've CLOSED the dialog window (window is not on screen and dialog reported by the game is None.)
-Otherwise the Senior Agent will be forced to make another call just to close the window. However, you may end early if there is a key decision to make.
-
-DEVELOPER TIP: The Senior Agent is an imperfect model and you may know better sometimes! Not always, but here's a free hint:
-Counterintuitively: Nurse Joy and shopkeepers have to be talked to _through_ a counter--that is, facing an impassable tile in front of them.
-Look for someone who is boxed in and can't move, and try "talk_to_npc_or_pick_up_item" on their coordinates.
+KEY DEVELOPER TASK: Check the Senior Agent's instructions for reasonableness. Be particularly on the lookout for if the
+Senior Agent gives you patent nonsense (for instance, telling you to talk to Nurse Joy when you're not even in
+the Pokemon Center and there's no visible nurse joy).
 
 Additional Instructions:
 
 Senior Agent: {additional_detailed_instructions}
-
-You may use the "press_buttons" tool to run the game.
-Note: the navigate_to_coordinate tool will aid you in moving places, and is FASTER and MORE RELIABLE then walking directly.
 
 When done with your task, please use the "task_done" to indicate that you are finished. Please include return information,
 as described here:
@@ -1288,8 +1422,15 @@ Senior Agent: {return_instructions}
 
 If you failed the task or having serious difficulty or think it can no longer be done, instead call "task_aborted" and explain why. This includes trying the same button press 10+ times with no result.
 
-Extra tip: When in dialogue or combat, be careful about pressing A too many times. This can easily skip the dialogue you are trying to see!
-Extra tip: Think carefully before trying to move: Is there dialogue on the screen? Typically you need to exit dialogue with A before being allowed to move.
+DEELOPER: Here are some tips for your task:
+
+1. If you are being asked to run dialogue to completion, make sure not to report done until you've CLOSED the dialog window (window is not on screen and dialog reported by the game is None.)
+However, you may end early if there is a key decision to make.
+2. When in dialogue or combat, be careful about pressing A too many times. This can easily skip the dialogue you are trying to see!
+3. Think carefully before trying to move: Is there dialogue on the screen? Typically you need to exit dialogue with A before being allowed to move.
+4. Counterintuitively: Nurse Joy and shopkeepers have to be talked to _through_ a counter--that is, facing an impassable tile in front of them.
+Look for someone who is boxed in and can't move, and try "talk_to_npc_or_pick_up_item" on their coordinates.
+5. In Pokemone Red, shopkeepers are almost always in Column 0, on the left middle of the building. Your senior agent is very bad at spotting this, so you might have to point out the real location (For instance, in your task_abort message mention that shop keeper is at (0, 5), or wherever you see them.)
 """
 
             self.sub_agent = SmallTaskAgent(instructions, self, needs_text_map, tool_id, "message_history", "openai_message_history")  # Could be switched to navigator etc. If necessary, we can work out how to logic that.
@@ -1668,7 +1809,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 # tool_id = tool_call.call_id
             buttons = tool_input["buttons"]
             wait = tool_input.get("wait", True)
-        result = self.press_buttons(buttons, wait, tool_id, is_subtool=is_subagent, suppress_button_repetition_warning=True)
+        result = self.press_buttons(buttons, wait, tool_id, is_subtool=is_subagent, suppress_button_repetition_warning=True, interrupt_if_combat_or_dialogue=True)
         result["content"].append({"type": "text", "text": "NAVIGATED USING navigate_to_coordinate" + one_tile_off_warning})
         return result
 
@@ -1762,7 +1903,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                                     else:
                                         # Image is missing
                                         screenshot = self.emulator.get_screenshot()
-                                        screenshot_b64 = self.get_screenshotb64(screenshot)
+                                        screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
                                         maybe_content.append({
                                             "type": "image",
                                             "source": {
@@ -1771,7 +1912,6 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                                                 "data": screenshot_b64,
                                             },
                                         })
-                                breakpoint()
                         messages = copy.deepcopy(self.message_history)
 
                     if len(messages) >= 3:
@@ -1802,6 +1942,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     # Get model response
                     if MODEL == "CLAUDE":
                         instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT
+                        instructions += "\n\nGOAL: " + self.navigator_goal
                         response = self.anthropic_client.messages.create(
                             model=ANTHROPIC_MODEL_NAME,
                             max_tokens=MAX_TOKENS,
@@ -2015,6 +2156,8 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                             if tool_result["type"] == "sub_agent":
                                 continue_subtool = True
                                 break
+                            if tool_result.get("do_not_append_tool_to_history"):
+                                continue
                             tool_results.append(tool_result)
                             openai_result = {
                                 "type": "function_call_output",
@@ -2081,9 +2224,10 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                         tool_results.append({"type": "text", "text": f"WARNING: MALFORMED TOOL CALL. Call using the function call, not in the text."})
 
                     # Add tool results to message history
-                    messages_here.append(
-                        {"role": "user", "content": tool_results}  # type: ignore
-                    )
+                    if tool_results:
+                        messages_here.append(
+                            {"role": "user", "content": tool_results}  # type: ignore
+                        )
                     
                     # Check if we need to summarize the history
                     if self.use_navigator_this_round:
@@ -2137,9 +2281,13 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 location = self.emulator.get_location()
                 new_coords = self.emulator.get_coordinates()
                 if self.last_location != location:
-                    if self.last_coords is not None and not self.emulator.get_in_combat() and self.last_location is not None:
-                        self.label_archive.setdefault(self.last_location, {}).setdefault(self.last_coords[1], {})[self.last_coords[0]] = f"Entrance to {location} (Approximate)"
-                        self.label_archive.setdefault(location, {}).setdefault(new_coords[1], {})[new_coords[0]] = f"Entrance from {self.last_location} (Approximate)"
+                    # We don't set a label if there was a blackout.
+                    if self.is_blackout:
+                        self.is_blackout = False  # reset this.
+                    else:
+                        if self.last_coords is not None and not self.emulator.get_in_combat() and self.last_location is not None:
+                            self.label_archive.setdefault(self.last_location, {}).setdefault(self.last_coords[1], {})[self.last_coords[0]] = f"Entrance to {location} (Approximate)"
+                            self.label_archive.setdefault(location, {}).setdefault(new_coords[1], {})[new_coords[0]] = f"Entrance from {self.last_location} (Approximate)"
                     self.steps_since_location_shift = 0
                     self.steps_since_label_reset = 0
                     # The navigator turns OFF the moment the location changes. Note: if there is a sub_agent running, we are never in navigator_mode
@@ -2149,6 +2297,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                         self.openai_message_history.append({"role": "user", "content": [{"text": "Note: Detailed Navigator Mode was just turned off since a new location was reached", "type": "text"}]})
                         # TODO: Consolidate navigator messages and clear
                     self.detailed_navigator_mode = False
+                    self.exploration_repeats = 0
                 self.last_location = location
                 if self.steps_since_label_reset > (200 if MODEL == "CLAUDE" else 1000):
                     self.text_display.add_message("Clearing labels to clear potential bad labels...")
@@ -2444,12 +2593,18 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
             collision_map = self.update_and_get_full_collision_map()
         else:
             if location in self.full_collision_map:
+                this_location = self.label_archive.get(location)
+                # this sucks man
+                for key, value in self.label_archive.items():
+                    if location.lower() == key.lower():
+                        this_location = ({} if this_location is None else this_location) | value
+                        break
                 all_warps = self.emulator.get_warps()
                 nearby_warps = []
                 for entry in all_warps:
                     if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
                         nearby_warps.append(entry)
-                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), direction=self.emulator.get_direction())
+                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), direction=self.emulator.get_direction(), local_label_archive=this_location)
             else:
                 collision_map = "Not yet available"
 
