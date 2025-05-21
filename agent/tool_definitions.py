@@ -29,6 +29,22 @@ PRESS_BUTTON_SCHEMA = {
         },
     }
 
+ADVICE_SCHEMA = {
+    "name": "ask_for_advice",
+    "description": "Ask for advice on a specific topic (list is limited)",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "topic": {
+                "type": "string",
+                "enum": ["shopping", "beating brock"],
+                "description": "Topic to give advice on."
+            },
+        },
+        "required": ["topic"],
+    },
+}
+
 EXPLORE_SCHEMA = {
     "name": "explore_direction",
         "description": "Explore in a direction automatically for a bit. Try this when looking for things or if stuck!",
@@ -120,7 +136,8 @@ AVAILABLE_TOOLS = [
     PRESS_BUTTON_RESTRICTED_SCHEMA,
     TALK_TO_NPC_SCHEMA,
     LOG_NPC_SCHEMA,
-    EXPLORE_SCHEMA
+    EXPLORE_SCHEMA,
+    ADVICE_SCHEMA
 ]
 
 AVAILABLE_TOOLS.append({
@@ -238,8 +255,12 @@ AVAILABLE_TOOLS.append({
         "input_schema": {
             "type": "object",
             "properties": {
+                "goal": {
+                    "type": "string",
+                    "description": "Is there anything specific we are trying to navigate to?"
+                },
             },
-            "required": [],
+            "required": ["goal"],
         },
 })
 
@@ -258,6 +279,21 @@ AVAILABLE_TOOLS.append({
         },
 })"""
 
+END_NAVIGATION_SCHEMA = {
+        "name": "end_navigation",
+        "description": "End navigation assistance",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": "Why did you end navigation?"
+                },
+            },
+            "required": ["reason"],
+        },
+}
+
 GOOGLE_TOOLS = convert_tool_defs_to_google_format(AVAILABLE_TOOLS)
 
 # WHY ARE THEY ALL DIFFERENT AHHHH
@@ -269,6 +305,7 @@ for entry in AVAILABLE_TOOLS:
     if entry["name"] in ["detailed_navigator", "mark_checkpoint", "use_subagent"]:
         continue
     NAVIGATOR_TOOLS.append(entry)
+NAVIGATOR_TOOLS.append(END_NAVIGATION_SCHEMA)
 
 GOOGLE_NAVIGATOR_TOOLS = convert_tool_defs_to_google_format(NAVIGATOR_TOOLS)
 
