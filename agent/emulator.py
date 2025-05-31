@@ -61,6 +61,12 @@ class Emulator:
         self.pyboy_lock = PriorityLock()
         self.button_queue_clear = threading.Event()
 
+        # Dialogue handler (for keeping track of multiple lines of dialogue e.g. in combat)
+        self.dialogue_thread: threading.Thread
+        self.stored_dialogue = []
+        self.is_dialogue_running = False
+        self.dialogue_lock = threading.Lock()
+
     # pyboy just doesn't work unless it's ticking and receiving button presses on the same thread as it was initialoized on, so
     # if we want it to be able to run independently we have to resort to keeping it in its own little box like this (in a thread)
     def player(self, rom_path, headless=True, sound=False):
@@ -132,6 +138,7 @@ class Emulator:
             self.run_thread = threading.Thread(target=self.player, kwargs={"rom_path": rom_path, "headless": headless, "sound": sound})
             self.run_thread.start()
             self.wait_for_pyboy()
+            self.begin_updating_dialogue()
 
     def wait_for_pyboy(self):
         while True:
@@ -141,6 +148,40 @@ class Emulator:
                 time.sleep(0.1)
             else:
                 break
+
+    def begin_updating_dialogue(self):  # Call after wait_for_pyboy
+        # A crass way of doing this, but not easy to do otherwise without breaking into pyboy.
+        self.is_dialogue_running = True
+        dialogue_check_interval = 0.2
+        def dialogue_update():
+            while self.is_dialogue_running:
+                cur_dialogue = self.get_active_dialog()
+                with self.dialogue_lock:
+                    if cur_dialogue is None:  # We might lose a few lines at the end of combat or something but this will prevent problems.
+                        self.stored_dialogue.clear()
+                    else:
+                        # If we have two instances of identical dialogue except one has a ►, favor the one with the arrow. Otherwise favor the more recent one.
+                        if self.stored_dialogue and cur_dialogue.replace("▼", "").replace("►", "").strip() == self.stored_dialogue[-1].replace("▼", "").replace("►", "").strip():
+                            if "►" in cur_dialogue:  # If this is not the case we should keep stored_dialogue.  
+                                self.stored_dialogue[-1] = cur_dialogue
+                        elif self.stored_dialogue and cur_dialogue.startswith(self.stored_dialogue[-1]):  # we have overlapping dialogue
+                            self.stored_dialogue[-1] = cur_dialogue  # There's a number of edge cases that might hit this but for the sake of simplicity we're ignoring those.
+                            # Now we must compared -1 and -2 if possible since they might match now. If so we need to wipe the last entry to prevent stutter.
+                            if len(self.stored_dialogue) > 1 and self.stored_dialogue[-1].replace("▼", "").replace("►", "").strip() == self.stored_dialogue[-2].replace("▼", "").replace("►", "").strip():
+                                self.stored_dialogue.pop()
+                        else:
+                            self.stored_dialogue.append(cur_dialogue)
+                time.sleep(dialogue_check_interval)
+        self.dialogue_thread = threading.Thread(target=dialogue_update)
+        self.dialogue_thread.start()
+
+    def get_stored_dialogue(self):
+        if not self.stored_dialogue:
+            return None
+        with self.dialogue_lock:
+            all_dialogue = "\n".join(self.stored_dialogue)
+            self.stored_dialogue.clear()
+        return all_dialogue
 
     def get_screenshot(self):
         """Get the current screenshot. We wait for the queue to clear to make sure all buttons are pressed."""
@@ -202,10 +243,13 @@ class Emulator:
                 
                 if wait:
                     # self.tick(120) # Wait longer after button release
-                    self.button_queue.put(("wait", 120))
+                    if button in ["a", "b"]:
+                        self.button_queue.put(("wait", 1000))
+                    else:
+                        self.button_queue.put(("wait", 250))
                 else:
                     # self.tick(10)   # Brief pause between button presses
-                    self.button_queue.put(("wait", 10))
+                    self.button_queue.put(("wait", 120))
             if wait_for_finish:
                 self.button_queue_clear.wait()
                 
@@ -288,6 +332,19 @@ class Emulator:
         full_map = self.pyboy.game_wrapper.game_area()
         collision_map = self.pyboy.game_wrapper.game_area_collision()
         downsampled_terrain = self._downsample_array(collision_map)
+
+        # So caves provide an interesting challenge, because there are elevation tiles that are technically passable but
+        # can't be reached except by other elevated tiles.
+        # Conveniently, elevated tiles are consistently all 261. If any tiles are the rocky edge (279, 305, or 272) it's
+        # always either the impassable edge of a platform, or one of those weird semi-hills that can never be walked on.
+        # So we can partly "fix" this by detecting 279, 305, or 272 and ruling it out as impassable
+        for row in range(9):
+            for col in range(10):
+                if np.any(full_map[row*2:row*2+2, col*2:col*2+2] == 279) or np.any(full_map[row*2:row*2+2, col*2:col*2+2] == 305) or np.any(full_map[row*2:row*2+2, col*2:col*2+2] == 272):                                                                                                                        
+                    downsampled_terrain[row][col] = 0
+
+        # ...however that leaves the pure 261 tiles, which are technically passable but in practice can never be walked into except from another 261 tile or stair tile (or bridges like in victory road)
+        # THat can't be handled in the collision map. It has to be dealt with during pathing. Stairs are 277 and 278 btw, but use 22 since that's what the game code does.
 
         # Get sprite locations
         sprite_locations_and_ids = {x: y for x, y in self.get_sprites()}
@@ -709,7 +766,7 @@ class Emulator:
             memory_str += f"  {item} x{qty}\n"
 
         # Dialog
-        dialog = reader.read_dialog()
+        dialog = self.get_stored_dialogue()
         if dialog:
             memory_str += f"Dialog: {dialog}\n"
         else:
@@ -725,6 +782,8 @@ class Emulator:
                 memory_str += f"- {move} (PP: {pp})\n"
             if pokemon.status != StatusCondition.NONE:
                 memory_str += f"Status: {pokemon.status.get_status_name()}\n"
+            else:
+                memory_str += f"Status: Normal\n"
 
         return memory_str, location, coords
 
@@ -732,3 +791,4 @@ class Emulator:
         with self.pyboy_lock(1):
             self.button_queue_clear.clear()
             self.button_queue.put(("stop", None))
+        self.is_dialogue_running = False

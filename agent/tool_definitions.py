@@ -6,6 +6,22 @@ from google.genai import types
 from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to_openai_format
 
 
+PRESS_SINGLE_BUTTON_SCHEMA = {
+        "name": "press_single_button",
+        "description": "Press a single button on the Game Boy.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "button": {
+                    "type": "string",
+                    "enum": ["a", "b", "start", "select", "up", "down", "left", "right"],
+                    "description": "Button to press. Valid buttons: 'a', 'b', 'start', 'select', 'up', 'down', 'left', 'right'"
+                }
+            },
+            "required": ["button"],
+        },
+    }
+
 PRESS_BUTTON_SCHEMA = {
         "name": "press_buttons",
         "description": "Press a sequence of buttons on the Game Boy.",
@@ -28,6 +44,18 @@ PRESS_BUTTON_SCHEMA = {
             "required": ["buttons"],
         },
     }
+
+# The model is perfectly capable of doing this itself, but this saves tokens and is QoL
+WAIT_FOR_WILD_ENCOUNTER_IN_GRASS = {
+    "name": "wander_grass_until_wild_encounter",
+    "description": "Randomly wander grass until combat starts. Will not work outside grass.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+        },
+        "required": [],
+    },
+}
 
 ADVICE_SCHEMA = {
     "name": "ask_for_advice",
@@ -86,7 +114,7 @@ PRESS_BUTTON_RESTRICTED_SCHEMA = {
 
 TALK_TO_NPC_SCHEMA = {
         "name": "talk_to_npc_or_pick_up_item",
-        "description": "Begine talking to a NPC or pick up an item at the coordinates. If the tile is empty, will try to find one within one tile of the given coordinates instead. Will abort if more than one found.",
+        "description": "Begin talking to a NPC or pick up an item at the coordinates. If the tile is empty, will try to find one within one tile of the given coordinates instead. Will abort if more than one found.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -137,7 +165,8 @@ AVAILABLE_TOOLS = [
     TALK_TO_NPC_SCHEMA,
     LOG_NPC_SCHEMA,
     EXPLORE_SCHEMA,
-    ADVICE_SCHEMA
+    ADVICE_SCHEMA,
+    WAIT_FOR_WILD_ENCOUNTER_IN_GRASS
 ]
 
 AVAILABLE_TOOLS.append({

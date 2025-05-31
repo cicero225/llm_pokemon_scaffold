@@ -5,7 +5,7 @@ import json
 from agent.emulator import Emulator
 from agent.utils import convert_tool_defs_to_google_format, convert_tool_defs_to_openai_format, convert_anthropic_message_history_to_google_format, extract_tool_calls_from_gemini
 from config import MINI_MODEL, ANTHROPIC_MINI_MODEL_NAME, GEMINI_MINI_MODEL_NAME, OPENAI_MINI_MODEL_NAME, MAX_TOKENS_MINI, TEMPERATURE, MAX_TOKENS_OPENAI
-from agent.tool_definitions import PRESS_BUTTON_SCHEMA, TALK_TO_NPC_SCHEMA, NAVIGATE_TO_COORDINATE_SCHEMA
+from agent.tool_definitions import PRESS_SINGLE_BUTTON_SCHEMA, TALK_TO_NPC_SCHEMA, NAVIGATE_TO_COORDINATE_SCHEMA
 
 from google.genai import types
 from google.genai.errors import ServerError
@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 # Maybe it's own file if it gets too big, but for now I like just having this here.
 SMALL_TASK_TOOL_DEFINITIONS = [
-    PRESS_BUTTON_SCHEMA,
+    PRESS_SINGLE_BUTTON_SCHEMA,
     TALK_TO_NPC_SCHEMA,
     NAVIGATE_TO_COORDINATE_SCHEMA,
     {
@@ -50,7 +50,7 @@ SMALL_TASK_TOOL_DEFINITIONS = [
     }
 ]
 
-MAX_SUBAGENT_STEPS = 50
+MAX_SUBAGENT_STEPS = 70
 
 class SmallTaskAgent:
     def __init__(self, instructions: str, senior_agent: "SimpleAgent", include_text_map: bool, task_id: str, message_history_to_append: str, openai_message_history_to_append: str):
@@ -276,6 +276,23 @@ class SmallTaskAgent:
             wait = tool_input.get("wait", True)
             # Note that this has side effects on location history, etc. But this is DELIBERATE.
             output = self.senior_agent.press_buttons(buttons, wait, tool_id, include_text_map=self.needs_text_map, is_subtool=True)
+            if MINI_MODEL == "OPENAI":
+                self.deferred_information = output
+                return {
+                    "type": "tool_result",
+                    "tool_use_id": tool_id,
+                    "content": [
+                        {"type": "text", "text": (
+                            f"Pressed buttons: {', '.join(buttons)}"
+                        )}
+                    ],
+                }
+            else:
+                return output
+        elif tool_name == "press_single_button":
+            button = tool_input["button"]
+            # Note that this has side effects on location history, etc. But this is DELIBERATE.
+            output = self.senior_agent.press_buttons([button], False, tool_id, include_text_map=self.needs_text_map, is_subtool=True)
             if MINI_MODEL == "OPENAI":
                 self.deferred_information = output
                 return {

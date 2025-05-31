@@ -29,10 +29,10 @@ PRIORITY:
         there and skip all other tasks.
 2. Use the "explore_direction" tool whenever possible to uncover new parts of the map.
     2a. Use the other tools only to perform specific tasks (talk to a NPC, move to a warp, etc.)
-    2b. If this tool fails (returns "No valid unexplored tiles."), call end_navigation and explain that the whole map is explored already.
 3. Do you best to achieve the goal given. If the goal is achieved, call end_navigation and explain that you are done.
-4. Pick up any items you see.
-5. Talk to any NEW NPCs you see. Do not go to NPCs in explored regions of the map, as this is repeititive.
+4. If you notice that the local area has been completely explored (your tool info may tell you this) you should call end_navigation.
+5. Pick up any items you see.
+6. Talk to any NEW NPCs you see. Do not go to NPCs in explored regions of the map, as this is repeititive.
     4a. Again: Only talk to NPCS you recently just found.
 
 Additional tips:
@@ -196,10 +196,25 @@ playing the game just by inspecting the list. Ensure that the following informat
 3. Current key objectives or goals
 
 Note: At times there will be long periods of nonactivity where another program is handling navigation between battles in an area. This is expected and normal.
+
+BONUS FACTS FROM DEVELOPER (100% reliable) THAT MAY OR MAY NOT BE USEFUL RIGHT NOW:
+
+Beating Brock is straightforward with with Squirtle or Bulbasaur, but considerably more difficult with Charmander, especially in Pokemon Red. Some key tips:
+    
+1. In Pokemon Red, options for other pokemon to help on Brock are limited. There is no Mankey on Route 22 (which is only in Pokemon Yellow) and Nidoran doesn't learn double-kick until Level 43.
+    The best option is typically considered evolving a Metapod from Viridian forest into Butterfree for Confusion.
+2. Onix and Geodude both have very high defense relative to special defense. Because of this, Ember is better than Scratch, despite being Not Very Effective.
+3. Consider training Charmander to Lvl 16 for the evolution to Charmeleon. The significant stat boost can really help.
+4. Onix's Bide does damage based on how much take it takes while charging. This is a great time to use growl or other non-damaging moves.
 """
 
-META_KNOWLEDGE_SUMMARIZER = """I need you to create a detailed summary of Pokemon Red game progress up to this point,
-using a curated list of FACTS you will be provided. This information will be used to guide an agent to continue playing and progressing in the game.
+with open("agent/bonus_hints.txt", "r") as fr:
+    bonus_hints = fr.read()
+
+META_KNOWLEDGE_SUMMARIZER = f"""I need you to create a detailed summary of Pokemon Red game progress up to this point,
+using a curated list of FACTS you will be provided. This information will be used to guide an agent to continue playing and progressing in the game. You will also be provided
+with a list of hints from the developer in this prompt for you to consider. If something in the list is relevant to the current situation, please provide this information
+in your summary!
 
 Next to each fact you will likely find a percentage indicating how reliable the fact is. Use this as a guide and avoid using unreliable facts.
 
@@ -213,7 +228,6 @@ HIGH PRIORITY: REMOVE ALL REFERENCES to explicit coordinates. This can perpetuat
 
 Make sure that each fact has a percentage next to it indicating how reliable you think it is (e.g. 0%, 25%, 50%, 100%)
 
-
 Once this is done, inspect the conversation history and if the conversation shows signs of serious difficulty completing a task.
 Append a section of IMPORTANT HINTS to help guide progress. 
 
@@ -225,30 +239,33 @@ One big sign of navigation problems is if the model has been trying to navigate 
 
 PRIORITY THREE: The agent is often short-sighted and plans for the short-tern. You should try to keep long-term goals in mind and remind them.
 
-TIPS TO PROVIDE FOR NAVIGATION:
-1. If the agent is in a maze, remind it of the importance of labeling dead-ends to avoid repeat visits.
-2. Remind the agent to consult its text_based map.
-3. Remember that "navigate_to_offscreen_coordinate" and the "detailed_navigator" tool are there to query for help.
-4. If they seem to be stuck in a location, emphasize the importance of NOT revisiting EXPLORED tiles. It may even be PRIORITY ONE to stop stepping on EXPLORED tiles.
-5. In mazes, it is MORE IMPORTANT to avoid EXPLORED tiles than to go in the correct direction.
-    5a. Often in mazes, you have to go south first to eventually go north, for example. This can be very far -- 30 or more coordinate squaares away.
-    5b. In Mazes, it is important to label dead-ends to avoid repeated visits, particularly if they are covered in EXPLORED tiles.
-    5c. 0, 0 is the topmost-leftmost part of the map.
-    5d. A DEPTH-FIRST SEARCH, using EXPLORED tiles as markers of previous locations, is a great way to get through mazes. Don't turn around unless you run into a dead end.
-6. Pay attention to the text_based maps and whether the direction of travel is sensible. They may be pathing into a dead end!
-   
+{bonus_hints}
 
 OTHER NOTES:
 1. If the wrong NPC is talked to frequently, remind yourself to label a wrong NPC's location (on the NPC's location)
 
-When hinting, AVOID repeating coordinates or locations you do not see on screen from the conversation history -- the conversation is often
-mistaken about the exact location of objects or NPCs, and repeating it can reinforce the mistake.
-
-HOWEVER coordinates you get from the summary are reliable.
-
 Note: At times there will be long periods of nonactivity where another program is handling navigation between battles in an area. This is expected and normal.
+
 """
 
+MID_POINT_HINT_PROMPT = f"""
+
+Your job will be to inspect an ongoing playthrough of Pokemon Red by an error-prone agent, and consider whether to provide hints from a list of hints.
+To do this, you will be given the recent conversation history of the playthrough as well the following pieces of information:
+
+1. A screenshot of the game currently
+2. An text_based collision map of the current location, based on exploration so far.
+3. Information gathered from the RAM state of the game.
+4. A list of checkpoints logged by the agent to track progress.
+5. Labels for map locations assigned by the agent and other code.
+6. A previous summary of the state of the game.
+
+Based on this, either copy verbatim the a useful hint from the list of hints or say "NO HINT" if no hint is relevant to the current situation.
+
+Here is the list of hints:
+
+{bonus_hints}
+"""
 
 
 ##########
@@ -417,6 +434,7 @@ Navigation (and vision):
 5. Remember to check "Labeled nearby location" for location coordinates.
 6. Exploring unvisited tiles is a TOP priority. Make sure to call explore_direction when needed to look in a particular direction.
 7. If stuck in an area on the overworld for too long (for instance over 300 steps), use the detailed_navigator too to try to help you explore.
+8. wander_grass_until_wild_encounter can be used to find wild pokemon quickly.
 
 Delegation
 ---
@@ -448,6 +466,7 @@ Tool usage instructions (READ CAREFULLY):
 navigate_to_coordinate: Use this to get to any coordinate in your explored text_map or screenshot
 
 explore_direction: Use this when you want to head in a general direction, but don't know exactly where. (e.g. you're looking for an exit North.)
+Note: If all possible exploration tiles have been explored, this tool will be automatically disabled and missing from your tool definitions.
 
 talk_to_npc_or_pick_up_item: Can be used to try to talk to npcs at or near a coordinate (provide exact coordinates when possible). Will also pick up items!
 
@@ -466,13 +485,9 @@ log_npc_name_and_dialogue: Use this to label NPCs after talking to them.
 mark_checkpoint: call this when you achieve a major navigational objective OR blackout
 
 ask_for_advice: Ask for advice on a current topic you are having difficulty with. Only a few items listed for now.
+
+wander_grass_until_wild_encounter: Convenience tool to use when trying to encounter random pokemon.
 """
-
-
-
-
-
-
 
 
 

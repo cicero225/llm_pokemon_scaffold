@@ -7,6 +7,7 @@ import numpy as np
 import os
 import pickle
 from PIL import ImageDraw, ImageFilter, Image
+import random
 import threading
 import warnings
 
@@ -26,7 +27,7 @@ from openai import OpenAI
 from openai.types import responses
 from openai import BadRequestError
 
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -57,13 +58,23 @@ class LocationCollisionMap:
         self.row_offset = initial_coords[1] - 4
         # tile_map is a game_area() from the emulator that contains tile information. Used to extract things like grass or ledges.
         # tile_map is 18 x 20, to allow for the possibiltiy of multiple thinsg in the same place. Confusingly, it is row first.
-        # Grass is 338.
+        # Grass is 338 or 288, or several other things I need to figure out..  -> label 1
+        # Void is 316  -> label -1
+        # Elevation is 261 on any tile
+        # Stairs are 277 on the bottom left. -> 3
+        # We need to figure out what bridges are (since that's also valid path to elevation in victory road)
         self.internal_map = -np.ones((10, 9), dtype=np.int8) # We make our map the "proper" order that everything else is.
         self.tile_map = np.zeros((10, 9), dtype=np.int8)   # for now 1 is grass, 0 is anything else.
         for row in range(9):
             for col in range(10):
-                if np.any(initial_tile_map[row*2:row*2+2, col*2:col*2+2] == 338):  # grass
+                if np.any(initial_tile_map[row*2:row*2+2, col*2:col*2+2] == 338) or np.any(initial_tile_map[row*2:row*2+2, col*2:col*2+2] == 288):  # grass
                     self.tile_map[col][row] = 1
+                elif np.any(initial_tile_map[row*2:row*2+2, col*2:col*2+2] == 316):
+                    self.tile_map[col][row] = -1
+                elif np.any(initial_tile_map[row*2:row*2+2, col*2:col*2+2] == 261):
+                    self.tile_map[col][row] = 2
+                elif np.any(initial_tile_map[row*2:row*2+2, col*2:col*2+2] == 277): 
+                    self.tile_map[col][row] = 3
                 if row == 4 and col == 4:  # player character
                     self.internal_map[col][row] = 3
                 elif nearby_warps is not None and (col + self.col_offset, row + self.row_offset) in nearby_warps:
@@ -112,8 +123,16 @@ class LocationCollisionMap:
         local_row_offset = new_min_row - self.row_offset
         for row in range(9):
             for col in range(10):
-                if np.any(tile_map[row*2:row*2+2, col*2:col*2+2] == 338):  # grass
-                    self.tile_map[col][row] = 1
+                if np.any(tile_map[row*2:row*2+2, col*2:col*2+2] == 338) or np.any(tile_map[row*2:row*2+2, col*2:col*2+2] == 288):  # grass
+                    self.tile_map[col + local_col_offset][row + local_row_offset] = 1
+                elif np.any(tile_map[row*2:row*2+2, col*2:col*2+2] == 316):
+                    self.tile_map[col + local_col_offset][row + local_row_offset] = -1
+                elif np.any(tile_map[row*2:row*2+2, col*2:col*2+2] == 261):  # Note: ALL not Any
+                    self.tile_map[col + local_col_offset][row + local_row_offset] = 2
+                elif np.any(tile_map[row*2:row*2+2, col*2:col*2+2] == 277): 
+                    self.tile_map[col + local_col_offset][row + local_row_offset] = 3
+                else:
+                    self.tile_map[col + local_col_offset][row + local_row_offset] = 0
                 if row == 4 and col == 4:  # player character. It's okay to wipe warp information temporarily because it's almost certainly coming back.
                     self.internal_map[col + local_col_offset][row + local_row_offset] = 3
                     continue
@@ -151,6 +170,8 @@ class LocationCollisionMap:
                 # if the tile itsellf is "off the edge" from a explored area then it's not an exploration tile.
                 valid_exploration_tile = not ((tile[0] - self.col_offset - 4 < min(0, self.col_offset) and "left" in self.discovered_edges) or (tile[1] - self.row_offset - 4 < min(0, self.row_offset) and "up" in self.discovered_edges) or (tile[0] - self.col_offset + 5 > self.internal_map.shape[0] - 1 and "right" in self.discovered_edges) or (tile[1] - self.row_offset + 4 > self.internal_map.shape[1] - 1 and "down" in self.discovered_edges))         
                 candidate_tiles = ((tile[0] + 1, tile[1]), (tile[0] - 1, tile[1]), (tile[0], tile[1] + 1), (tile[0], tile[1] - 1))  # I feel like there's a smarter way
+                tile_is_stairs = (self.tile_map[tile[0] - self.col_offset][tile[1] - self.row_offset] == 3)
+                tile_is_elevation = (self.tile_map[tile[0] - self.col_offset][tile[1] - self.row_offset] == 2)
                 for candidate in candidate_tiles:
                     shifted_col = candidate[0] - self.col_offset
                     shifted_row = candidate[1] - self.row_offset
@@ -164,7 +185,16 @@ class LocationCollisionMap:
                             adjacent_to_unexplored_or_edge.add(tile)
                     if candidate in visited_tiles:
                         continue
-                    if self.internal_map[shifted_col][shifted_row] in (1, 5):   # the only passable scenarios
+                    if self.internal_map[shifted_col][shifted_row] == 1 :   # Basic passable tile check
+                        # Extra check: if the tile is ELEVATION, it can only be pathed to from other ELEVATION or stairs (or bridge but not supported yet.) This is also true in reverse. (non-elevation can reach stairs but not elevation)
+                        if (self.tile_map[shifted_col][shifted_row] == 3 or tile_is_stairs or   # Candidate or tile is stairs
+                            ((self.tile_map[shifted_col][shifted_row] == 2) == tile_is_elevation)  # candidate shares same elevation status as tile
+                        ):
+                            new_tiles.add(candidate)
+                            distances[candidate] = d + 1
+                    # For whatever reason warps don't follow the same rules as the above and may get marked unreachable for elevation reasons improper.
+                    # This creates a very specific edge case involving ladders right next to elevation changes. Let's see if it happens.
+                    if self.internal_map[shifted_col][shifted_row] == 5:  
                         new_tiles.add(candidate)
                         distances[candidate] = d + 1
                     visited_tiles.add(candidate)
@@ -242,11 +272,11 @@ class LocationCollisionMap:
                     "·· - Path/Walkable",
                     "SS - Sprite",
                     "PP - Player Character",
-                    "II - Item"
+                    "II - Item",
                     "xx - AVOID GOING HERE - Already Explored",
                     "uu - Blank = Unknown/Unvisited",
                     "ww - Warp",
-                    "Numbers - How many tiles away this tile is to reach."
+                    "Numbers - How many tiles away this tile is to reach.",
                     "cc - CHECK HERE - next to Unexplored.",
                     ":: - Unreachable?"
                 ]
@@ -279,6 +309,8 @@ class LocationCollisionMap:
                 row_piece = ""
                 if self.tile_map[col_num][row_num] == 1 and col > 0:
                     row_piece = "Grass; "
+                elif self.tile_map[col_num][row_num] == -1 and col == 0:
+                    row_piece = "Void; "
                 else:
                     row_piece = "Not grass; "
                 if local_label_archive is not None:
@@ -359,6 +391,9 @@ class LocationCollisionMap:
         if self.internal_map[col - self.col_offset][row - self.row_offset] == -1:
             return False
         return True
+    
+    def is_grass(self, col: int, row: int) -> bool:
+        return self.tile_map[col - self.col_offset][row - self.row_offset] == 1
 
 # Updates a text file over time to write the last X blocks of text to a text file so we can see it well
 # with tail -F or something.
@@ -388,7 +423,7 @@ class SimpleAgent:
         max_history=60, 
         load_state=None, 
         location_history_length=40, 
-        location_archive_file_name: Optional[str]=None, 
+        location_archive_file_name: str="", 
         use_full_collision_map: bool=True,
         pyboy_main_thread: bool=False
     ):
@@ -400,6 +435,8 @@ class SimpleAgent:
             sound: Whether to enable sound
             max_history: Maximum number of messages in history before summarization
         """
+        if not location_archive_file_name:
+            raise ValueError("You must specify a filename for saving location state.")
         self.emulator = Emulator()
         self.pyboy_main_thread = pyboy_main_thread
         self.emulator_init_kwargs = {"rom_path": rom_path, "headless": headless, "sound": sound, "pyboy_main_thread": self.pyboy_main_thread}
@@ -413,8 +450,8 @@ class SimpleAgent:
             self.openai_client = OpenAI(api_key=API_OPENAI)
         self.running = True
         # TODO: OKAY LOOK this was originally a pretty small state and that it got out of hand.
-        self.message_history = [{"role": "user", "content": "You may now begin playing."}]
-        self.openai_message_history = [{"role": "user", "content": "You may now begin playing."}]
+        self.message_history: list[dict[str, Any]] = [{"role": "user", "content": "You may now begin playing."}]
+        self.openai_message_history: list[dict[str, Any]] = [{"role": "user", "content": "You may now begin playing."}]
         self.max_history = max_history
         self.location_history_length = location_history_length
         self.location_archive_file_name = location_archive_file_name
@@ -439,7 +476,7 @@ class SimpleAgent:
         self.last_coords = None  # A bit more precise, since it includes detailed trajectories from push button and navigate to.
         self.checkpoints = []  # A long-running list of achievements, used to track internal progress.
         self.detailed_navigator_mode = False
-        self.navigator_message_history = [{"role": "user", "content": "Please begin navigating!"}]
+        self.navigator_message_history: list[dict[str, Any]] = [{"role": "user", "content": "Please begin navigating!"}]
         self.openai_navigator_message_history = [{"role": "user", "content": "Please begin navigating!"}]
         self.steps_since_location_shift = 0
         self.no_navigate_here = ""
@@ -451,6 +488,9 @@ class SimpleAgent:
         self.navigator_goal: str = ""
         self.exploration_repeats = 0
         self.is_blackout = False
+        self.hint_provided = False
+        self.call_midpoint_now = False
+        self.call_agentic_summary_now = False
 
         if load_state and not self.pyboy_main_thread:
             logger.info(f"Loading saved state from {load_state}")
@@ -470,19 +510,18 @@ class SimpleAgent:
             new_size = (screenshot.width * upscale, screenshot.height * upscale)
             screenshot = screenshot.resize(new_size)
 
-        past_locations = self.location_history
-        location_labels = self.label_archive.get(location)
-        if location is not None:
-            # this sucks man
-            for key, value in self.label_archive.items():
-                if location.lower() == key.lower():
-                    location_labels = ({} if location_labels is None else location_labels) | value
-                    break
-        if location_labels is None:
+        if location is None:
             location_labels = {}
-        local_location_tracker = self.location_tracker.get(location, [])
+            local_location_tracker = []
+            past_locations = []
+        else:
+            past_locations = self.location_history
+            location_labels = self.get_location_labels(location)
+            if location_labels is None:
+                location_labels = {}
+            local_location_tracker = self.location_tracker.get(location, [])
 
-        collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
+        collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()  # type: ignore
         downsampled_terrain = self.emulator._downsample_array(collision_map)
 
         sprite_locations_and_ids = {x: y for x, y in self.emulator.get_sprites()}
@@ -500,9 +539,9 @@ class SimpleAgent:
             # Rows 0 - 8, Cols 0 - 9
             if add_coords:
                 assert player_coords is not None
+                nearby_warps = []
                 if show_nearby_warps:
                     all_warps = self.emulator.get_warps()
-                    nearby_warps = []
                     for entry in all_warps:
                         if (entry[0] - player_coords[0] < 6 or player_coords[0] - entry[0] < 5) and abs(entry[1] - player_coords[1]) < 5:
                             nearby_warps.append(entry)
@@ -538,8 +577,6 @@ class SimpleAgent:
                                 elif (location, (real_col, real_row)) in past_locations:
                                     # ImageDraw.Draw(screenshot).rectangle(((col * tile_size + (relative_square_size - 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size - 1)*mid_length/relative_square_size), (col * tile_size + (relative_square_size + 1)*mid_length/relative_square_size, row * tile_size + (relative_square_size + 1)*mid_length/relative_square_size)), (0, 255, 0))         
                                     tile_label += "\n" + "RECENTLY\nVISITED"
-                                else:
-                                    tile_label += "\n" + "CHECK\nHERE"
                         else:
                             if sprite_locations_and_ids[(col, row)] in [122, 123]:  # this is pokeball
                                 tile_label += "\n" + "ITEM"
@@ -587,7 +624,7 @@ class SimpleAgent:
             pickle.dump(self.navigation_location, fw)
             # We strip the internal reference temporarily, or else pickle will fail
             if self.sub_agent is not None:
-                self.sub_agent.senior_agent = None
+                self.sub_agent.senior_agent = None  # type: ignore
                 pickle.dump(self.sub_agent, fw)
                 self.sub_agent.senior_agent = self
             else:
@@ -595,6 +632,8 @@ class SimpleAgent:
             pickle.dump(self.button_history, fw)
             pickle.dump(self.navigator_goal, fw)
             pickle.dump(self.exploration_repeats, fw)
+            pickle.dump(self.hint_provided, fw)
+
     def load_location_archive(self, pkl_path: str) -> None:
         try:
             with open(pkl_path, 'rb') as fr:
@@ -628,6 +667,7 @@ class SimpleAgent:
                     self.button_history = pickle.load(fr)
                     self.navigator_goal = pickle.load(fr)
                     self.exploration_repeats = pickle.load(fr)
+                    self.hint_provided = pickle.load(fr)
                     for x in self.full_collision_map.values():
                         try:
                             x.tile_map
@@ -740,11 +780,54 @@ class SimpleAgent:
             else:
                 breakpoint()
 
+    def get_location_labels(self, location: Optional[str] = None) -> Optional[dict[int, dict[int, str]]]:  # Compensates for the fact that the model likes to store locations without all caps and older versionso f the save files don't accomodate this.
+        if location is None:
+            location = self.emulator.get_location()
+        if location in self.full_collision_map:
+            this_location = self.label_archive.get(location)
+            # this sucks man
+            for key, value in self.label_archive.items():
+                if location.lower() == key.lower():
+                    this_location = ({} if this_location is None else this_location) | value
+                    break
+        else:
+            this_location = None
+        return this_location
+
+    def get_ascii_collision_map_no_update(self, location: Optional[str]=None, coords: Optional[tuple[int, int]]=None) -> Optional[str]:
+        if location is None:
+            location = self.emulator.get_location()
+        if coords is None:
+            coords = self.emulator.get_coordinates()
+        if location in self.full_collision_map:
+            this_location = self.get_location_labels(location)
+            if this_location is None:
+                this_location = {}
+            return self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), direction=self.emulator.get_direction(), local_label_archive=this_location)
+        else:
+            return None
+
     def update_and_get_full_collision_map(self):
         location = self.emulator.get_location()
         coords = self.emulator.get_coordinates()
+        full_map = self.emulator.pyboy.game_wrapper.game_area()
         collision_map = self.emulator.pyboy.game_wrapper.game_area_collision()
         downsampled_terrain = self.emulator._downsample_array(collision_map)
+
+        # So caves provide an interesting challenge, because there are elevation tiles that are technically passable but
+        # can't be reached except by other elevated tiles.
+        # Conveniently, elevated tiles are consistently all 261. If any tiles are the rocky edge (279, 305, or 272) it's
+        # always either the impassable edge of a platform, or one of those weird semi-hills that can never be walked on.
+        # So we can partly "fix" this by detecting 279, 305, or 272 and ruling it out as impassable
+        for row in range(9):
+            for col in range(10):
+                if np.any(full_map[row*2:row*2+2, col*2:col*2+2] == 279) or np.any(full_map[row*2:row*2+2, col*2:col*2+2] == 305) or np.any(full_map[row*2:row*2+2, col*2:col*2+2] == 272):                                                                                                                        
+                    downsampled_terrain[row][col] = 0
+
+        # ...however that leaves the pure 261 tiles, which are technically passable but in practice can never be walked into except from another 261 tile or stair tile (or bridges like in victory road)
+        # THat can't be handled in the collision map. It has to be dealt with during pathing. Stairs are 277 and 278 btw, but use 22 since that's what the game code does.
+
+
         local_location_tracker = self.location_tracker.get(location, [])
         all_warps = self.emulator.get_warps()
         nearby_warps = []
@@ -753,17 +836,14 @@ class SimpleAgent:
             if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
                 nearby_warps.append(entry)
 
-        this_location = self.label_archive.get(location)
-        # this sucks man
-        for key, value in self.label_archive.items():
-            if location.lower() == key.lower():
-                this_location = ({} if this_location is None else this_location) | value
-                break
+        this_location = self.get_location_labels(location)
+        if this_location is None:
+            this_location = {}
         
         # slightly more efficient than setdefault
         this_map = self.full_collision_map.get(location)
         if this_map is None:
-            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, self.emulator.pyboy.game_area(), nearby_warps) 
+            self.full_collision_map[location] = LocationCollisionMap(downsampled_terrain, self.emulator.get_sprites(), coords, full_map, nearby_warps) 
             # Handle edge case: if we're not standing on a warp, then we just came in through a zone transition and
             # need to inform the mapping tool.
             if coords not in all_warps:
@@ -778,17 +858,12 @@ class SimpleAgent:
                         self.full_collision_map[location].mark_discovered_edge("left")
             return self.full_collision_map[location].to_ascii(local_location_tracker, direction=direction, local_label_archive=this_location)
         else:
-            this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords, self.emulator.pyboy.game_area(), nearby_warps)
+            this_map.update_map(downsampled_terrain, self.emulator.get_sprites(), coords, full_map, nearby_warps)
             return this_map.to_ascii(local_location_tracker, direction=direction, local_label_archive=this_location)
         
-    def get_all_location_labels(self, location: str) -> list[tuple[tuple[int, int], str]]:
+    def get_all_location_labels_as_list(self, location: Optional[str]) -> list[tuple[tuple[int, int], str]]:
         all_labels: list[tuple[tuple[int, int], str]] = []
-        this_location = self.label_archive.get(location)
-        # this sucks man
-        for key, value in self.label_archive.items():
-            if location.lower() == key.lower():
-                this_location = ({} if this_location is None else this_location) | value
-                break
+        this_location = self.get_location_labels(location)
         if this_location is not None and this_location:
             max_row = max(this_location.keys())
             for nearby_row in range(max_row + 1):
@@ -800,6 +875,18 @@ class SimpleAgent:
                         if this_col is not None:
                             all_labels.append(((nearby_col, nearby_row), this_col))  # Note that we only care about our current location
         return all_labels
+    
+    def get_full_memory_info(self, get_nearby_warps: bool=True, display_warp_functor: Optional[Callable[[int, int], bool]] = None, location: Optional[str]=None) -> tuple[str, str, tuple[int, int]]:
+        # Get memory info but append data that aren't pure emulator.
+        if location is None:
+            location = self.emulator.get_location()
+        full_collision_map = self.full_collision_map[location] if location in self.full_collision_map else None
+        memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=full_collision_map.is_in_map if full_collision_map is not None else None)
+        if not self.emulator.get_in_combat and full_collision_map is not None and not full_collision_map.adjacent_to_unexplored_or_edge:
+            memory_info += "\n\nNOTE: LOCAL AREA HAS BEEN COMPLETELY EXPLORED."
+
+        return memory_info, location, coords
+
     
     def press_buttons(self, buttons: list[str], wait: bool, tool_id: str, include_text_map: bool=True, is_subtool: bool=False, suppress_button_repetition_warning: bool=False, interrupt_if_combat_or_dialogue: bool=False) -> dict[str, Any]:
         self.text_display.add_message(f"[Buttons] Pressing: {buttons} (wait={wait})")
@@ -860,10 +947,11 @@ class SimpleAgent:
             # Brutish hack but it works. We need this to prevent weird labels being set thanks to
             # blackout teleportation.
             # Note a nuance here: this is not allowed to set it False, only to True. False can only be set in the main loop that also does labeling.
-            if self.emulator.get_active_dialog() and "blacked out" in self.emulator.get_active_dialog().lower():
+            cur_dialogue = self.emulator.get_active_dialog()
+            if cur_dialogue is not None and "blacked out" in cur_dialogue.lower():
                 self.is_blackout = True
             if interrupt_if_combat_or_dialogue:
-                if self.emulator.get_active_dialog() or self.emulator.get_in_combat():
+                if cur_dialogue is not None or self.emulator.get_in_combat():
                     break
 
         self.last_coords = last_coords
@@ -871,7 +959,7 @@ class SimpleAgent:
         location = self.emulator.get_location()
         
         # Get game state from memory after the action
-        memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
+        memory_info, location, coords = self.get_full_memory_info(location=location)
         # Log the memory state after the tool call
         logger.info(f"[Memory State after action]")
         logger.info(memory_info)
@@ -901,7 +989,7 @@ class SimpleAgent:
                     col.extend(False for _ in range(0, coords[1] + 1))
             cols[coords[0]][coords[1]] = True
 
-        all_labels = self.get_all_location_labels(location)
+        all_labels = self.get_all_location_labels_as_list(location)
 
 
         # Return tool result as a dictionary
@@ -1001,7 +1089,7 @@ class SimpleAgent:
 
 
     # TODO: An obvious refactor would be to move some of these into their own functions.
-    def process_tool_call(self, tool_call, model: str):
+    def process_tool_call(self, tool_call, model: Literal["CLAUDE", "GEMINI", "OPENAI"]) -> dict[str, Any]:
         """Process a single tool call."""
         tool_name = tool_call.name
         if model == "CLAUDE":
@@ -1020,11 +1108,55 @@ class SimpleAgent:
             buttons = tool_input["buttons"]
             wait = tool_input.get("wait", True)
             return self.press_buttons(buttons, wait, tool_id)
+        elif tool_name == "wander_grass_until_wild_encounter":  # Assumes no 1 tile patch of ground in the game....
+            if self.emulator.get_in_combat():
+                return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Invalid. Already in combat!"}
+                        ],
+                    }
+            if self.emulator.get_active_dialog() is not None:
+                return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Invalid. Cannot wander grass while in dialogue."}
+                        ],
+                    }
+            # First check if we are in grass.
+            location = self.emulator.get_location()
+            full_collision_map = self.full_collision_map[location]
+            coords = self.emulator.get_coordinates()
+            if not full_collision_map.is_grass(coords[0], coords[1]):
+                return {
+                        "type": "tool_result",
+                        "tool_use_id": tool_id,
+                        "content": [
+                            {"type": "text", "text": f"Invalid. Only call wander_grass_until_wild_encounter while in grass"}
+                        ],
+                    }
+            while not self.emulator.get_in_combat():
+                rand_dir = random.choice(["up", "down", "left", "right"])
+                if rand_dir == "up" and (not full_collision_map.is_in_map(coords[0], coords[1] - 1) or not full_collision_map.is_grass(coords[0], coords[1] - 1)):
+                    continue
+                if rand_dir == "down" and (not full_collision_map.is_in_map(coords[0], coords[1] + 1) or not full_collision_map.is_grass(coords[0], coords[1] + 1)):
+                    continue
+                if rand_dir == "left" and (not full_collision_map.is_in_map(coords[0] - 1, coords[1]) or not full_collision_map.is_grass(coords[0] - 1, coords[1])):
+                    continue
+                if rand_dir == "right" and (not full_collision_map.is_in_map(coords[0] + 1, coords[1]) or not full_collision_map.is_grass(coords[0] + 1, coords[1])):
+                    continue
+                result = self.press_buttons([rand_dir], False, tool_id, suppress_button_repetition_warning=True)
+                coords = self.emulator.get_coordinates()
+            
+            result["content"].append({"type": "text", "text": f"Random grass movement finished. Now in combat."})
+            return result      
         elif tool_name == "navigate_to":  # Unused for now
             row = tool_input["row"]
             col = tool_input["col"]
             location = self.emulator.get_location()
-            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
+            memory_info, location, coords = self.get_full_memory_info(location=location)
             self.text_display.add_message(f"[Navigation] Navigating to: ({col}, {row})")  # 8, 3 -> 6, 4 is 2, 5
             
             # The navigator goes to location on screen, with 0,0 at the top left.
@@ -1048,7 +1180,7 @@ class SimpleAgent:
             
             # Get game state from memory after the action
             location = self.emulator.get_location()
-            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
+            memory_info, location, coords = self.get_full_memory_info(location=location)
 
             # Get a fresh screenshot after executing the buttons
             screenshot = self.emulator.get_screenshot()
@@ -1085,7 +1217,7 @@ class SimpleAgent:
                     cols[coords[0]][coords[1]] = True
 
             # TODO: eventually do this more reasonably. For now we do this extraordinarily dumb approach.
-            all_labels = self.get_all_location_labels(location)
+            all_labels = self.get_all_location_labels_as_list(location)
 
             # Return tool result as a dictionary
             # OPENAI doesn't know what to do with too much information here.
@@ -1267,6 +1399,7 @@ class SimpleAgent:
                 # this should update each time navigate_to_coordinate is called...
                 location = self.emulator.get_location()
                 if location != original_location:
+                    assert result is not None
                     result["content"].append({"type": "text", "text": f"Moved to {' then, '.join(str(x) for x in candidates)}"})
                     result["content"].append({"type": "text", "text": f"Exploration terminated. New location reached."})
                     return result
@@ -1320,7 +1453,7 @@ class SimpleAgent:
                 candidates.append(candidate)
                 # We assume it works, since the map should guarantee that. Even if it doesn't, fail silently for now.
                 result = self.navigate_to_coordinate(candidate[0], candidate[1], tool_id, is_subagent=False)
-                if self.emulator.get_active_dialog():
+                if self.emulator.get_active_dialog() is not None:
                     self.exploration_repeats += 1
                     coords = self.emulator.get_coordinates()
                     screenshot = self.emulator.get_screenshot()
@@ -1343,6 +1476,7 @@ class SimpleAgent:
                 self.exploration_repeats = 0
                 num_moves += 1
             # TODO: Does this work correctly for OPENAI?
+            assert result is not None
             result["content"].append({"type": "text", "text": f"Moved to {' then, '.join(str(x) for x in candidates)}"})
             return result
         elif tool_name == "navigate_to_coordinate":
@@ -1417,6 +1551,7 @@ by the Senior agent. "Press A" or "Advance through dialogue" are not sufficient 
 for the Senior agent to make the decision.
 2. ALWAYS double-check the senior agent instructions and abort the task if the task makes no sense. The Senior Agent hallucinates sometimes.
     2a. Example: THe Senior Agent somtimes thinks it is in a Pokeon center when it isn't. If the RAM data does not say POKEMON CENTER, you are not in the Pokemon center!
+3. Avoid pressing more than one button at a time when reading dialogue, in combat, or in a menu, to avoid mistakes.
 
 If the senior agent asks you to violate these rules, call task_abort immediately and explain the rule violation.
 
@@ -1443,19 +1578,18 @@ DEELOPER: Here are some tips for your task:
 
 1. If you are being asked to run dialogue to completion, make sure not to report done until you've CLOSED the dialog window (window is not on screen and dialog reported by the game is None.)
 However, you may end early if there is a key decision to make.
-2. When in dialogue or combat, be careful about pressing A too many times. This can easily skip the dialogue you are trying to see!
-3. Think carefully before trying to move: Is there dialogue on the screen? Typically you need to exit dialogue with A before being allowed to move.
-4. Counterintuitively: Nurse Joy and shopkeepers have to be talked to _through_ a counter--that is, facing an impassable tile in front of them.
+2. Think carefully before trying to move: Is there dialogue on the screen? Typically you need to exit dialogue with A before being allowed to move.
+3. Counterintuitively: Nurse Joy and shopkeepers have to be talked to _through_ a counter--that is, facing an impassable tile in front of them.
 Look for someone who is boxed in and can't move, and try "talk_to_npc_or_pick_up_item" on their coordinates.
-5. In Pokemone Red, shopkeepers are almost always in Column 0, on the left middle of the building. Your senior agent is very bad at spotting this, so you might have to point out the real location (For instance, in your task_abort message mention that shop keeper is at (0, 5), or wherever you see them.)
+4. In Pokemon Red, shopkeepers are almost always in Column 0, on the left middle of the building. Your senior agent is very bad at spotting this, so you might have to point out the real location (For instance, in your task_abort message mention that shop keeper is at (0, 5), or wherever you see them.)
 """
 
             self.sub_agent = SmallTaskAgent(instructions, self, needs_text_map, tool_id, "message_history", "openai_message_history")  # Could be switched to navigator etc. If necessary, we can work out how to logic that.
-            self.text_display.add_message(f"Subagent summoned with instructions {instructions}")
+            self.text_display.add_message(f"Subagent summoned with instructions:\n\n1.{detailed_instructions}\n\n2.{additional_detailed_instructions}\n\n3.{return_instructions}")
             # Initial Context
             location = self.emulator.get_location()
-            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
-            all_labels = self.get_all_location_labels(location)
+            memory_info, location, coords = self.get_full_memory_info(location=location)
+            all_labels = self.get_all_location_labels_as_list(location)
             screenshot = self.emulator.get_screenshot()
             screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
             last_checkpoints = '\n'.join(self.checkpoints[-10:])
@@ -1622,7 +1756,7 @@ Look for someone who is boxed in and can't move, and try "talk_to_npc_or_pick_up
         # is there dialogue on screen now?
         no_dialogue_warning = ""
         dialogue = self.emulator.get_active_dialog()
-        if not dialogue:
+        if dialogue is None:
             no_dialogue_warning = "\nWarning: No dialogue seen."
 
         return {
@@ -1677,7 +1811,7 @@ Look for someone who is boxed in and can't move, and try "talk_to_npc_or_pick_up
         if DIRECT_NAVIGATION:
             self.text_display.add_message(f"Navigating with existing map...")
             buttons = self.full_collision_map[location].generate_buttons_to_coord(col, row)
-            wait = True
+            wait = False
         else:
             query = f"""Please take a look at the attached text_based map.
 
@@ -1829,6 +1963,217 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
         result = self.press_buttons(buttons, wait, tool_id, is_subtool=is_subagent, suppress_button_repetition_warning=True, interrupt_if_combat_or_dialogue=True)
         result["content"].append({"type": "text", "text": "NAVIGATED USING navigate_to_coordinate" + one_tile_off_warning})
         return result
+    
+
+    # TODO: Refactor this further.
+    def main_model_call(self, messages: list[dict[str, Any]], claude_tools: list[dict[str, Any]], gemini_tools: list[types.Tool], openai_tools: list[dict[str, Any]]) -> tuple[list[Any], int, bool, dict[str, Any]]:
+        # Get model response
+        malformed = False
+        if MODEL == "CLAUDE":
+            instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT
+            if self.use_navigator_this_round:
+                instructions += "\n\nGOAL: " + self.navigator_goal
+            response = self.anthropic_client.messages.create(
+                model=ANTHROPIC_MODEL_NAME,
+                max_tokens=MAX_TOKENS,
+                system=instructions,
+                messages=messages,  # type: ignore
+                tools=NAVIGATOR_TOOLS if self.use_navigator_this_round else claude_tools,  # type: ignore
+                temperature=TEMPERATURE,
+            )
+            token_usage = response.usage.input_tokens + response.usage.output_tokens
+            logger.info(f"Response usage: {response.usage}")
+            # Extract tool calls
+            tool_calls = [
+                block for block in response.content if block.type == "tool_use"
+            ]
+
+            # Display the model's reasoning
+            for block in response.content:
+                if block.type == "text":
+                    self.text_display.add_message(f"[Text] {block.text}")
+                elif block.type == "tool_use":
+                    self.text_display.add_message(f"[Tool] Using tool: {block.name}")
+
+            assistant_content = []
+            # Process tool calls
+            if tool_calls:
+                # Add assistant message to history
+                for block in response.content:
+                    if block.type == "text":
+                        assistant_content.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        assistant_content.append({"type": "tool_use", **dict(block)})
+        elif MODEL == "GEMINI":
+            # messages -> Gemini format
+            google_messages = convert_anthropic_message_history_to_google_format(messages)
+
+            instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT
+            if self.use_navigator_this_round:
+                instructions += "\n\nGOAL: " + self.navigator_goal
+            config=types.GenerateContentConfig(
+                    max_output_tokens=None,
+                    temperature=TEMPERATURE,
+                    system_instruction=instructions,
+                    tools=GOOGLE_NAVIGATOR_TOOLS if self.use_navigator_this_round else gemini_tools  # type: ignore
+                )
+            chat = self.gemini_client.chats.create(
+                model=GEMINI_MODEL_NAME,
+                history=google_messages[:-1],  # type: ignore
+                config=config
+            )   # context caching not available on gemini 2.5
+            retry_limit = 2
+            cur_retries = 0
+            while cur_retries < retry_limit:
+                try:
+                    response = chat.send_message(google_messages[-1].parts, config=config)
+                    break
+                except ServerError as e:
+                    if e.code != 500:
+                        raise e
+                    cur_retries += 1
+                except Exception as e:
+                    breakpoint()
+            logger.info(f"Response usage: {response.usage_metadata.total_token_count}")
+            tool_calls = []
+            assistant_content = []
+            malformed = False
+            if response.candidates is not None:
+                text, tool_calls, assistant_content, malformed = extract_tool_calls_from_gemini(response)
+                self.text_display.add_message(f"[Text] {text}")
+                token_usage = 0  # I didn't even remember to track this but it probably doesn't matter
+        elif MODEL == "OPENAI":
+            # For openai we need to add a screenschot too to tool calls or it gets very confused.
+            # Get a fresh screenshot after executing the buttons
+            messages_to_use = self.openai_navigator_message_history if self.use_navigator_this_round else self.openai_message_history
+            
+            self.strip_text_map_and_images_from_history(messages_to_use, openai_format=True)
+            
+            if isinstance(messages_to_use[-1], dict) and messages_to_use[-1].get('type') == "function_call_output":
+                # Unfortunately this is buried...
+                # Apparently openai can get confused without a fresh update.
+                location = self.emulator.get_location()
+                memory_info, location, coords = self.get_full_memory_info(location=location)
+                all_labels = self.get_all_location_labels_as_list(location)
+                screenshot = self.emulator.get_screenshot()
+                screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
+                last_checkpoints = '\n'.join(self.checkpoints[-10:])
+                content = [
+                        {
+                            "type": "input_text",
+                            "text": (f"\nGame state information from memory after your action:\n{memory_info}"
+                                    f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}" +
+                                    f"\nHere are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}" +
+                                    f"\nHere are your last 10 checkpoints:\n{last_checkpoints}" +
+                                    f"\nYou have been in this location for {self.steps_since_location_shift} steps") +
+                                    f"\nCHECK HERE TO EXPLORE {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}",
+                                    
+                        },
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{screenshot_b64}",
+                        },
+                    ]
+                if not self.emulator.get_in_combat() and (self.use_full_collision_map or self.detailed_navigator_mode):
+                    content[0]['text'] += "\n\nHere is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map()
+                if self.emulator.get_in_combat() and self.detailed_navigator_mode:
+                    # Only possible if navigator mode has been running.
+                    content[0]['text'] += "\n\n "  + "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."
+                messages_to_use.append({
+                    "role": "user",
+                    "content": content,  # type: ignore
+                })
+            instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT_OPENAI
+            if self.use_navigator_this_round:
+                instructions += "\n\nGOAL: " + self.navigator_goal
+            retries = 2
+            cur_tries = 0
+            while cur_tries < retries:
+                try:
+                    response = self.openai_client.responses.create(
+                        model=OPENAI_MODEL_NAME,
+                        input=messages_to_use,  # type: ignore
+                        instructions=instructions,
+                        max_output_tokens=MAX_TOKENS_OPENAI,
+                        temperature=TEMPERATURE,
+                        tools=OPENAI_NAVIGATOR_TOOLS if self.use_navigator_this_round else openai_tools  # type: ignore
+                    )
+                    break
+                except BadRequestError as e:
+                    cur_tries += 1  # Sometimes it spuriously flags this as content violation. I don't know why.
+                    breakpoint()
+                    continue
+                except Exception as e:
+                    print(e)
+                    breakpoint()
+            # We immediately drop the previous images because of resource costs (and context explosion)
+            for message in messages_to_use:
+                # here we exploit the fact that it's always a dict if we're putting in images...
+                if isinstance(message, dict):
+                    try:
+                        outputs = message['content'] if 'content' in message else message['output']
+                        if isinstance(outputs, str):
+                            if 'output' in message:
+                                try:
+                                    decoded = json.loads(outputs)
+                                    for i, chunk in enumerate(decoded):
+                                        if not isinstance(chunk, dict):
+                                            continue
+                                        if chunk["type"] == "image":
+                                            decoded[i] = {
+                                                    "type": "input_text",
+                                                    "text": "Screenshot omitted in history for brevity",
+                                            }
+                                    message['output'] = json.dumps(decoded)
+                                except json.JSONDecodeError:
+                                    pass
+                        else:
+                            for chunk in outputs:
+                                if not isinstance(chunk, dict):
+                                    continue
+                                if chunk["type"] == "input_image":
+                                    del chunk["image_url"]
+                                    chunk["type"] = "input_text"
+                                    chunk["text"] = "Screenshot omitted in history for brevity"
+                    except KeyError as e:
+                        print(e)
+                        breakpoint()
+            messages_to_use.extend(response.output)  # type: ignore
+            # Gather Reasoning and tool calls
+            assistant_content = []
+            tool_calls = []
+            reasoning_texts = ""
+            response_texts = ""
+            for chunk in response.output:  # type: ignore
+                if isinstance(chunk, responses.ResponseReasoningItem):
+                    if chunk.summary:
+                        reasoning_texts += " ".join(x.text for x in chunk.summary) + "\n"
+                elif isinstance(chunk, responses.ResponseFunctionToolCall):
+                    try:
+                        assistant_content.append({"type": "tool_use", "id": chunk.call_id, "input": json.loads(chunk.arguments), "name": chunk.name})
+                        tool_calls.append(chunk)
+                    except Exception as e:
+                        breakpoint()
+                elif isinstance(chunk, responses.ResponseOutputMessage):
+                    try:
+                        response_texts += "\n".join(x.text for x in chunk.content)
+                    except AttributeError:
+                        # This was probably refused for safety reasons. Wait what?
+                        breakpoint()
+                else:
+                    breakpoint()
+
+                full_text = f"<thinking>{reasoning_texts}</thinking>\n\n" if reasoning_texts else "" + response_texts
+                if full_text:
+                    self.text_display.add_message(f"[Text] {full_text}")
+                    assistant_content.append({"type": "text", "text": full_text})
+            logger.info(f"Response usage: {response.usage.total_tokens if response.usage is not None else 'Unknown'}")
+            token_usage = response.usage.total_tokens if response.usage is not None else 0
+        else:
+            raise NotImplementedError("Unsupported Model Type?")
+        
+        return tool_calls, token_usage, malformed, assistant_content  # type: ignore
+
 
     def run(self, num_steps=1, save_every=10, save_file_name: Optional[str] = None, _running_in_thread=False):
         """Main agent loop.
@@ -1849,6 +2194,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
 
         if self.pyboy_main_thread:
             self.emulator.wait_for_pyboy()
+            self.emulator.begin_updating_dialogue()
 
             if self.load_state:
                 logger.info(f"Loading saved state from {self.load_state}")
@@ -1875,10 +2221,6 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                     malformed = False
                     continue_subtool, subtool_status = self.sub_agent.step()
                 else:
-                    # Validate message history: Somehow this happens sometimes and I would like to understand
-                    # why.
-                    if len(self.message_history) > 1 and 'type' in self.message_history[-1] and self.message_history[-1]['type'] == "tool_result" and self.message_history[-2]['type'] == "tool_result":
-                        breakpoint()
                     malformed = False
                     if self.use_navigator_this_round:
                         self.text_display.add_message("NAVIGATOR MODE")
@@ -1913,7 +2255,7 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                             last_message = self.message_history[-1]
                             if isinstance(last_message, dict):
                                 maybe_content = last_message.get("content")
-                                if maybe_content is not None:
+                                if maybe_content is not None and isinstance(maybe_content, dict):
                                     for content in maybe_content:
                                         if content.get("type") == "image":
                                             break
@@ -1940,234 +2282,42 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
 
                     token_usage = 0
 
-                    if self.detailed_navigator_mode:
-                        # Or else the model may try to use it, and that makes no sense.
+                    # TODO: These were accidentally named with constant-style names and that's not right.
+                    MODIFIED_AVAILABLE_TOOLS = AVAILABLE_TOOLS
+                    GOOGLE_MODIFIED_TOOLS = GOOGLE_TOOLS
+                    OPENAI_MODIFIED_TOOLS = OPENAI_TOOLS
+                    remove_tools = []
+                    if self.detailed_navigator_mode:  # So the main model can't try to call it while in combat or something and detailed navigator is already on.
+                        remove_tools.append("detailed_navigator")
+                    # QoL: if explore_direction tool won't work (all tiles have been explored), don't even give it as an option.
+                    suggestion_set = self.full_collision_map[location].adjacent_to_unexplored_or_edge
+                    if not suggestion_set:
+                        remove_tools.append("explore_direction")
+                    if remove_tools:
                         MODIFIED_AVAILABLE_TOOLS = []
                         for entry in AVAILABLE_TOOLS:
-                            if entry["name"] in ["detailed_navigator"]:
+                            if entry["name"] in remove_tools:
                                 continue
                             MODIFIED_AVAILABLE_TOOLS.append(entry)
 
-
                         GOOGLE_MODIFIED_TOOLS = convert_tool_defs_to_google_format(MODIFIED_AVAILABLE_TOOLS)
                         OPENAI_MODIFIED_TOOLS = convert_tool_defs_to_openai_format(MODIFIED_AVAILABLE_TOOLS)
-                    else:
-                        MODIFIED_AVAILABLE_TOOLS = AVAILABLE_TOOLS
-                        GOOGLE_MODIFIED_TOOLS = GOOGLE_TOOLS
-                        OPENAI_MODIFIED_TOOLS = OPENAI_TOOLS
 
-                    # Get model response
-                    if MODEL == "CLAUDE":
-                        instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT
-                        instructions += "\n\nGOAL: " + self.navigator_goal
-                        response = self.anthropic_client.messages.create(
-                            model=ANTHROPIC_MODEL_NAME,
-                            max_tokens=MAX_TOKENS,
-                            system=instructions,
-                            messages=messages,
-                            tools=NAVIGATOR_TOOLS if self.use_navigator_this_round else MODIFIED_AVAILABLE_TOOLS,
-                            temperature=TEMPERATURE,
-                        )
-                        token_usage = response.usage.input_tokens + response.usage.output_tokens
-                        logger.info(f"Response usage: {response.usage}")
-                        # Extract tool calls
-                        tool_calls = [
-                            block for block in response.content if block.type == "tool_use"
-                        ]
-
-                        # Display the model's reasoning
-                        for block in response.content:
-                            if block.type == "text":
-                                self.text_display.add_message(f"[Text] {block.text}")
-                            elif block.type == "tool_use":
-                                self.text_display.add_message(f"[Tool] Using tool: {block.name}")
-
+                    tool_calls, token_usage, malformed, assistant_content = self.main_model_call(messages, MODIFIED_AVAILABLE_TOOLS, GOOGLE_MODIFIED_TOOLS, OPENAI_MODIFIED_TOOLS)
                     
-                        # Process tool calls
-                        if tool_calls:
-                            # Add assistant message to history
-                            assistant_content = []
-                            for block in response.content:
-                                if block.type == "text":
-                                    assistant_content.append({"type": "text", "text": block.text})
-                                elif block.type == "tool_use":
-                                    assistant_content.append({"type": "tool_use", **dict(block)})
-                    elif MODEL == "GEMINI":
-                        # messages -> Gemini format
-                        google_messages = convert_anthropic_message_history_to_google_format(messages)
-
-                        instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT
-                        config=types.GenerateContentConfig(
-                                max_output_tokens=None,
-                                temperature=TEMPERATURE,
-                                system_instruction=instructions,
-                                tools=GOOGLE_NAVIGATOR_TOOLS if self.use_navigator_this_round else GOOGLE_MODIFIED_TOOLS
-                            )
-                        chat = self.gemini_client.chats.create(
-                            model=GEMINI_MODEL_NAME,
-                            history=google_messages[:-1],
-                            config=config
-                        )   # context caching not available on gemini 2.5
-                        retry_limit = 2
-                        cur_retries = 0
-                        while cur_retries < retry_limit:
-                            try:
-                                response = chat.send_message(google_messages[-1].parts, config=config)
-                                break
-                            except ServerError as e:
-                                if e.code != 500:
-                                    raise e
-                                cur_retries += 1
-                            except Exception as e:
-                                breakpoint()
-                        logger.info(f"Response usage: {response.usage_metadata.total_token_count}")
-                        tool_calls = []
-                        assistant_content = []
-                        malformed = False
-                        if response.candidates is not None:
-                            text, tool_calls, assistant_content, malformed = extract_tool_calls_from_gemini(response)
-                            self.text_display.add_message(f"[Text] {text}")
-                            token_usage = 0  # I didn't even remember to track this but it probably doesn't matter
-                    elif MODEL == "OPENAI":
-                        # For openai we need to add a screenschot too to tool calls or it gets very confused.
-                        # Get a fresh screenshot after executing the buttons
-                        messages_to_use = self.openai_navigator_message_history if self.use_navigator_this_round else self.openai_message_history
-                        
-                        self.strip_text_map_and_images_from_history(messages_to_use, openai_format=True)
-                        
-                        if isinstance(messages_to_use[-1], dict) and messages_to_use[-1].get('type') == "function_call_output":
-                            # Unfortunately this is buried...
-                            # parsed_result = json.loads(self.openai_message_history[-1]["output"])
-                            # Apparently openai can get confused without a fresh update.
-                            #if parsed_result[0]["text"].startswith("Pressed buttons") or parsed_result[0]["text"].startswith("Navigation"):
-                            location = self.emulator.get_location()
-                            memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
-                            all_labels = self.get_all_location_labels(location)
-                            screenshot = self.emulator.get_screenshot()
-                            screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
-                            last_checkpoints = '\n'.join(self.checkpoints[-10:])
-                            content = [
-                                    {
-                                        "type": "input_text",
-                                        "text": (f"\nGame state information from memory after your action:\n{memory_info}"
-                                                f"\nLabeled nearby locations: {','.join(f'{label_coords}: {label}' for label_coords, label in all_labels)}" +
-                                                f"\nHere are up to your last {str(self.location_history_length)} locations between commands (most recent first), to help you remember where you've been:/n{'/n'.join(f'{x[0]}, {x[1]}' for x in self.location_history)}" +
-                                                f"\nHere are your last 10 checkpoints:\n{last_checkpoints}" +
-                                                f"\nYou have been in this location for {self.steps_since_location_shift} steps") +
-                                                f"\nCHECK HERE TO EXPLORE {','.join(f'({x[0]}, {x[1]})' for x in self.full_collision_map[location].adjacent_to_unexplored_or_edge)}",
-                                                
-                                    },
-                                    {
-                                        "type": "input_image",
-                                        "image_url": f"data:image/png;base64,{screenshot_b64}",
-                                    },
-                                ]
-                            if not self.emulator.get_in_combat() and (self.use_full_collision_map or self.detailed_navigator_mode):
-                                content[0]['text'] += "\n\nHere is an text_based map of this RAM location compiled so far:\n\n" + self.update_and_get_full_collision_map()
-                            if self.emulator.get_in_combat() and self.detailed_navigator_mode:
-                                # Only possible if navigator mode has been running.
-                                content[0]['text'] += "\n\n "  + "NOTE: A Navigator version of Claude has been handling overworld movement for you, so your location may have shifted substantially. Please handle this battle for now."
-                            messages_to_use.append({
-                                "role": "user",
-                                "content": content,  # type: ignore
-                            })
-                        instructions = FULL_NAVIGATOR_PROMPT if self.use_navigator_this_round else SYSTEM_PROMPT_OPENAI
-                        retries = 2
-                        cur_tries = 0
-                        while cur_tries < retries:
-                            try:
-                                response = self.openai_client.responses.create(
-                                    model=OPENAI_MODEL_NAME,
-                                    input=messages_to_use,  # type: ignore
-                                    instructions=instructions,
-                                    max_output_tokens=MAX_TOKENS_OPENAI,
-                                    temperature=TEMPERATURE,
-                                    tools=OPENAI_NAVIGATOR_TOOLS if self.use_navigator_this_round else OPENAI_MODIFIED_TOOLS
-                                )
-                                break
-                            except BadRequestError as e:
-                                cur_tries += 1  # Sometimes it spuriously flags this as content violation. I don't know why.
-                                breakpoint()
-                                continue
-                            except Exception as e:
-                                print(e)
-                                breakpoint()
-                        # We immediately drop the previous images because of resource costs (and context explosion)
-                        for message in messages_to_use:
-                            # here we exploit the fact that it's always a dict if we're putting in images...
-                            if isinstance(message, dict):
-                                try:
-                                    outputs = message['content'] if 'content' in message else message['output']
-                                    if isinstance(outputs, str):
-                                        if 'output' in message:
-                                            try:
-                                                decoded = json.loads(outputs)
-                                                for i, chunk in enumerate(decoded):
-                                                    if not isinstance(chunk, dict):
-                                                        continue
-                                                    if chunk["type"] == "image":
-                                                        decoded[i] = {
-                                                                "type": "input_text",
-                                                                "text": "Screenshot omitted in history for brevity",
-                                                        }
-                                                message['output'] = json.dumps(decoded)
-                                            except json.JSONDecodeError:
-                                                pass
-                                    else:
-                                        for chunk in outputs:
-                                            if not isinstance(chunk, dict):
-                                                continue
-                                            if chunk["type"] == "input_image":
-                                                del chunk["image_url"]
-                                                chunk["type"] = "input_text"
-                                                chunk["text"] = "Screenshot omitted in history for brevity"
-                                except KeyError as e:
-                                    print(e)
-                                    breakpoint()
-                        messages_to_use.extend(response.output)  # type: ignore
-                        # Gather Reasoning and tool calls
-                        assistant_content = []
-                        tool_calls = []
-                        reasoning_texts = ""
-                        response_texts = ""
-                        for chunk in response.output:  # type: ignore
-                            if isinstance(chunk, responses.ResponseReasoningItem):
-                                if chunk.summary:
-                                    reasoning_texts += " ".join(x.text for x in chunk.summary) + "\n"
-                            elif isinstance(chunk, responses.ResponseFunctionToolCall):
-                                try:
-                                    assistant_content.append({"type": "tool_use", "id": chunk.call_id, "input": json.loads(chunk.arguments), "name": chunk.name})
-                                    tool_calls.append(chunk)
-                                except Exception as e:
-                                    breakpoint()
-                            elif isinstance(chunk, responses.ResponseOutputMessage):
-                                try:
-                                    response_texts += "\n".join(x.text for x in chunk.content)
-                                except AttributeError:
-                                    # This was probably refused for safety reasons. Wait what?
-                                    breakpoint()
-                            else:
-                                breakpoint()
-
-                            full_text = f"<thinking>{reasoning_texts}</thinking>\n\n" if reasoning_texts else "" + response_texts
-                            if full_text:
-                                self.text_display.add_message(f"[Text] {full_text}")
-                                assistant_content.append({"type": "text", "text": full_text})
-                        logger.info(f"Response usage: {response.usage.total_tokens if response.usage is not None else 'Unknown'}")
-                        token_usage = response.usage.total_tokens if response.usage is not None else 0
                         
 
                     openai_messages_to_use = self.openai_navigator_message_history if self.use_navigator_this_round else self.openai_message_history
                     messages_here = self.navigator_message_history if self.use_navigator_this_round else self.message_history
 
                     # Process tool calls
+                    tool_results = []
                     if tool_calls: 
                         messages_here.append(
                             {"role": "assistant", "content": assistant_content}
                         )
                         
                         # Process tool calls and create tool results
-                        tool_results = []
                         for tool_call in tool_calls:
                             tool_result = self.process_tool_call(tool_call, model=MODEL)
                             if tool_result["type"] == "sub_agent":
@@ -2271,10 +2421,15 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                             
                             if self.openai_navigator_message_history and self.openai_navigator_message_history[0].get('type') == "function_call_output":
                                 self.openai_navigator_message_history = self.openai_navigator_message_history[1:]
+                    elif self.call_agentic_summary_now or len(self.message_history) >= self.max_history or (MODEL == "OPENAI" and token_usage > 170000):  # To my surprise, o3 runs out fasssst
+                        self.agentic_summary()
+                        self.hint_provided = False
+                        self.call_agentic_summary_now = False
 
-                    else:
-                        if len(self.message_history) >= self.max_history or (MODEL == "OPENAI" and token_usage > 170000):  # To my surprise, o3 runs out fasssst
-                            self.agentic_summary()
+                    if self.call_midpoint_now or len(self.message_history) > round(self.max_history/2) and not self.hint_provided:
+                        self.mid_point_check()
+                        self.hint_provided = True
+                        self.call_midpoint_now = False
                 if self.sub_agent is None and not tool_calls:  # type: ignore
                     # Sometimes it just stalls out mysteriously or says some text.
                     messages_here.append(
@@ -2286,12 +2441,6 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
                 self.steps_since_checkpoint += 1
                 self.steps_since_label_reset += 1
                 self.steps_since_location_shift += 1
-                if self.sub_agent is None:
-                    if self.steps_since_location_shift > 300 and not self.detailed_navigator_mode:  # Since Claude absolutely refuses to ask for help.
-                        self.detailed_navigator_mode = True
-                        self.navigation_location = location
-                        self.navigator_message_history = [{"role": "user", "content": "Please begin navigating!"}]
-                        self.openai_navigator_message_history = [{"role": "user", "content": "Please begin navigating!"}]
                 if self.steps_since_checkpoint > 50 and not self.location_tracker_activated:
                     self.location_tracker_activated = True
                     self.location_tracker = {}
@@ -2593,36 +2742,23 @@ then use the provided "press_buttons" tool to send the necessary commands. Remem
             summary_text = response_texts
         return summary_text
     
-    def agentic_summary(self):
-        self.text_display.add_message(f"[Agent] Generating Facts Analysis, standby...")
-
+    
+    def get_info_for_critics_and_meta(self) -> tuple[str, tuple[int, int], str]:
         location = self.emulator.get_location()
-        memory_info, location, coords = self.emulator.get_state_from_memory(display_warp_functor=self.full_collision_map[location].is_in_map if location in self.full_collision_map else None)
+        memory_info, location, coords = self.get_full_memory_info(location=location)
         try:
-            previous_summary = self.message_history[0]["content"][0]["text"]
+            previous_summary = self.message_history[0]["content"][0]["text"]  # type: ignore
         except TypeError:
             previous_summary = "Start of the Game!"
         last_checkpoints = '\n'.join(self.checkpoints[-10:])
 
-        all_labels = self.get_all_location_labels(location)
+        all_labels = self.get_all_location_labels_as_list(location)
 
         if not self.emulator.get_in_combat():
             collision_map = self.update_and_get_full_collision_map()
         else:
-            if location in self.full_collision_map:
-                this_location = self.label_archive.get(location)
-                # this sucks man
-                for key, value in self.label_archive.items():
-                    if location.lower() == key.lower():
-                        this_location = ({} if this_location is None else this_location) | value
-                        break
-                all_warps = self.emulator.get_warps()
-                nearby_warps = []
-                for entry in all_warps:
-                    if (entry[0] - coords[0] < 6 or coords[0] - entry[0] < 5) and abs(entry[1] - coords[1]) < 5:
-                        nearby_warps.append(entry)
-                collision_map = self.full_collision_map[location].to_ascii(self.location_tracker.get(location, []), direction=self.emulator.get_direction(), local_label_archive=this_location)
-            else:
+            collision_map = self.get_ascii_collision_map_no_update(location, coords)
+            if collision_map is None:
                 collision_map = "Not yet available"
 
         prompt = f"""
@@ -2642,8 +2778,102 @@ Labeled nearby locations: {','.join(f'{coords}: {label}' for coords, label in al
 
 Previous game summary: {previous_summary}
 
-A game screenshot is attached.
+A game screenshot is attached."""
+        
+        return location, coords, prompt
+        
+    # Claude functions better with multiple text lines, whereas the other models don't know what to do with this.
+    def append_message_history_with_text_and_maybe_image(self, text_lines: list[str], include_image: bool, screenshot_b64: Optional[str]=None, append_navigator_instead: bool=False):
+        if include_image and screenshot_b64 is None:
+            screenshot = self.emulator.get_screenshot()
+            location = self.emulator.get_location()
+            coords = self.emulator.get_coordinates()
+            screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
 
+        content_list: list[dict[str, Any]] = [
+            {"type": "text",
+             "text": x}
+            for x in text_lines]
+        if include_image:
+            content_list.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": screenshot_b64,
+                        },
+                    })
+        if append_navigator_instead:
+            self.navigator_message_history.append(
+                {
+                    "role": "user",
+                    "content": content_list
+                }
+            )
+        else:
+            self.message_history.append(
+                {
+                    "role": "user",
+                    "content": content_list
+                }
+            )
+        openai_content_str = "\n\n".join(text_lines)
+        openai_content = [{
+                        "type": "input_text",
+                        "text": openai_content_str
+                    }]
+        if include_image:
+            openai_content.append({
+                        "type": "input_image",
+                        "image_url": f"data:image/png;base64,{screenshot_b64}",
+                    })
+        if append_navigator_instead:
+            self.openai_navigator_message_history.append(
+                {
+                    "role": "user",
+                    "content": openai_content
+                }
+            )
+        else:
+            self.openai_message_history.append(
+                {
+                    "role": "user",
+                    "content": openai_content
+                }
+            )
+
+    
+    def mid_point_check(self):
+        self.text_display.add_message(f"[Agent] Midpoint Hints Check")
+
+        location, coords, prompt = self.get_info_for_critics_and_meta()
+
+        prompt += """
+REMINDER: Your job is to provide optional hints
+Your job is NOT to play the game. Double-check your system prompt.
+"""
+
+        response = self.prompt_text_reply(MID_POINT_HINT_PROMPT, prompt, True, MODEL, True)
+
+        self.text_display.add_message(f"[Agent] Hints: {response}")
+        if "no hint" in response.lower():
+            return
+        
+        screenshot = self.emulator.get_screenshot()
+        screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
+
+        text_lines = [
+            f"Here is some potentially useful hints provided by an outside agent: {response}"
+        ]
+        self.append_message_history_with_text_and_maybe_image(text_lines, True, screenshot_b64, append_navigator_instead=self.use_navigator_this_round)
+
+    
+    def agentic_summary(self):
+        self.text_display.add_message(f"[Agent] Generating Facts Analysis, standby...")
+
+        location, coords, prompt = self.get_info_for_critics_and_meta()
+        
+        prompt += """
 REMINDER: Your job is to deduce the current state of the game from that conversation, as well as additional data you will be provided,
 Your job is NOT to play the game. Double-check your system prompt.
 """
@@ -2667,56 +2897,19 @@ Your job is NOT to play the game. Double-check your system prompt.
         with open("agentic_summary.txt", "w", encoding="utf-8") as fw:
             fw.write(response1 + "\n\n" + response2 + "\n\n" + response3)
 
-        # Get a fresh screenshot after executing the buttons
         screenshot = self.emulator.get_screenshot()
         screenshot_b64 = self.get_screenshot_base64(screenshot, upscale=4, add_coords=True, player_coords=coords, location=location)
 
         # Replace message history with just the summary
-        self.message_history = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"CONVERSATION HISTORY SUMMARY (representing {self.max_history} previous messages): {response3}"
-                    },
-                    {
-                        "type": "text",
-                        "text": "\n\nCurrent game screenshot for reference:"
-                    },
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": screenshot_b64,
-                        },
-                    },
-                    {
-                        "type": "text",
-                        "text": "You were just asked to summarize your playthrough so far, which is the summary you see above. You may now continue playing by selecting your next action."
-                    },
-                ]
-            }
+        text_lines = [
+            f"CONVERSATION HISTORY SUMMARY (representing {self.max_history} previous messages): {response3}",
+            "Current game screenshot is also included.",
+            "You were just asked to summarize your playthrough so far, which is the summary you see above. You may now continue playing by selecting your next action."
         ]
-        self.openai_message_history = [
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "input_text",
-                        "text": (f"CONVERSATION HISTORY SUMMARY (representing {self.max_history} previous messages): {response3}" +
-                                 "\n\nCurrent game screenshot is also included." +
-                                 "\n\nYou were just asked to summarize your playthrough so far, which is the summary you see above. You may now continue playing by selecting your next a.")
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": f"data:image/png;base64,{screenshot_b64}",
-                    },
-                ]
-            }
-        ]
-        
+        self.message_history =  []
+        self.openai_message_history = []
+        self.append_message_history_with_text_and_maybe_image(text_lines, True, screenshot_b64)
+
     def stop(self):
         """Stop the agent."""
         self.running = False
